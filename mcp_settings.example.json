@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "ib-api-tools": {
+      "command": "node",
+      "args": [
+        "/Users/charly/Documents/Cline/MCP/ib-api-tools/index.js"
+      ],
+      "env": {
+        "IB_API_URL": "https://your-ib-instance.intelligencebank.com"
+      },
+      "disabled": false
+    }
+  }
+}
