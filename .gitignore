@@ -21,3 +21,7 @@ npm-debug.log*
 # System files
 .DS_Store
 Thumbs.db
+
+# Supporting resources
+supporting_resources/
+cline_docs/
