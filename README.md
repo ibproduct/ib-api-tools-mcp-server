@@ -1,133 +1,180 @@
 # IntelligenceBank API Tools MCP Server
 
-An MCP server that provides tools for interacting with the IntelligenceBank API, including browser-based authentication.
+A remote MCP server that provides tools for interacting with the IntelligenceBank API using OAuth 2.0 authentication via the IntelligenceBank OAuth bridge.
 
-## Development
+## Overview
 
-### Local Development Setup
+This server enables AI assistants (like Claude) to interact with IntelligenceBank APIs through a secure, authenticated connection. It uses:
 
-1. Clone the repository:
-```bash
-git clone https://github.com/ibproduct/ib-api-tools-mcp-server.git
-cd ib-api-tools-mcp-server
-```
+- **Transport**: Streamable HTTP for remote access
+- **Authentication**: OAuth 2.0 Authorization Code Flow with PKCE
+- **OAuth Bridge**: Managed authentication service at AWS Lambda
+- **Deployment**: Can run locally or on EC2 for production use
 
-2. Install dependencies:
-```bash
-npm install
-```
+## Quick Start
 
-3. Create your .env file:
-```bash
-cp .env.example .env
-```
-Edit .env to set your IB_API_URL.
+### Local Development
 
-4. Install the development version to Cline MCP:
-```bash
-chmod +x scripts/dev-install.sh
-./scripts/dev-install.sh
-```
+1. **Clone and Install**
+   ```bash
+   git clone https://github.com/ibproduct/ib-api-tools-mcp-server.git
+   cd ib-api-tools-mcp-server
+   npm install
+   ```
 
-5. Configure VSCode MCP settings at `~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`:
+2. **Configure Environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
 
-```json
-{
-  "mcpServers": {
-    "ib-api-tools-dev": {
-      "command": "node",
-      "args": [
-        "/Users/charly/Documents/Cline/MCP/ib-api-tools-dev/index.js"
-      ],
-      "env": {
-        "IB_API_URL": "https://your-ib-instance.intelligencebank.com"
-      },
-      "disabled": false
-    }
-  }
-}
-```
+3. **Build and Run**
+   ```bash
+   npm run build
+   npm run dev
+   ```
 
-### Development Workflow
+   Server runs at `http://localhost:3000/mcp`
 
-1. Make changes to the source code
-2. Run `./scripts/dev-install.sh` to build and install to dev MCP location
-3. Test changes using the dev server:
-```typescript
-use_mcp_tool ib-api-tools-dev auth.login {}
-```
+4. **Test with MCP Inspector**
+   ```bash
+   npx @modelcontextprotocol/inspector
+   ```
+   Connect to: `http://localhost:3000/mcp`
 
-4. When ready, commit and push to GitHub:
-```bash
-git add .
-git commit -m "Description of changes"
-git push origin main
-```
+### Claude Desktop Configuration
 
-## Production Installation
+Add to your Claude desktop config:
 
-For production use, install from the released version:
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-1. Create the installation directory:
-```bash
-mkdir -p ~/Documents/Cline/MCP/ib-api-tools
-```
-
-2. Install the server:
-```bash
-# Clone the repository
-git clone https://github.com/ibproduct/ib-api-tools-mcp-server.git
-cd ib-api-tools-mcp-server
-
-# Install and build
-npm install
-npm run build
-
-# Copy to production location
-cp -r package.json dist/* ~/Documents/Cline/MCP/ib-api-tools/
-cd ~/Documents/Cline/MCP/ib-api-tools
-npm install --production
-```
-
-3. Configure VSCode MCP settings for production use:
 ```json
 {
   "mcpServers": {
     "ib-api-tools": {
-      "command": "node",
-      "args": [
-        "/Users/charly/Documents/Cline/MCP/ib-api-tools/index.js"
-      ],
-      "env": {
-        "IB_API_URL": "https://your-ib-instance.intelligencebank.com"
-      },
-      "disabled": false
+      "url": "http://localhost:3000/mcp"
     }
   }
 }
 ```
 
+For production deployment, use the production server URL (e.g., `https://mcp.intelligencebank.com/mcp`).
+
 ## Available Tools
 
 ### auth.login
-Starts the browser login flow. This will:
-1. Get an initial token from IB
-2. Open your browser to complete login
-3. Poll for completion
-4. Store the session for subsequent requests
 
-Example:
+Initiates the OAuth 2.0 authentication flow.
+
+**Input:**
+- `platformUrl` (optional): Your IntelligenceBank instance URL (e.g., `https://demo.intelligencebank.com`)
+
+**Output:**
+- `authorizationUrl`: URL to visit for authentication
+- `state`: CSRF protection parameter
+- `codeVerifier`: PKCE parameter (needed for token exchange)
+
+**Example:**
 ```typescript
-use_mcp_tool ib-api-tools auth.login {}
+use_mcp_tool ib-api-tools auth.login { "platformUrl": "https://demo.intelligencebank.com" }
+```
+
+### auth.exchange
+
+Exchanges the authorization code for access tokens.
+
+**Input:**
+- `code`: Authorization code from the callback URL
+- `codeVerifier`: PKCE parameter from login step
+- `state` (optional): State parameter for validation
+
+**Output:**
+- `accessToken`: JWT access token (1-hour expiry)
+- `tokenType`: Token type (Bearer)
+- `expiresIn`: Seconds until token expiry
+- `refreshToken`: Token for session renewal
+
+**Example:**
+```typescript
+use_mcp_tool ib-api-tools auth.exchange {
+  "code": "authorization-code-from-callback",
+  "codeVerifier": "code-verifier-from-login"
+}
 ```
 
 ### auth.status
-Check the current authentication status.
 
-Example:
+Validates the access token and retrieves user information.
+
+**Input:**
+- `accessToken`: The JWT access token
+
+**Output:**
+- `authenticated`: Boolean indicating if token is valid
+- `userInfo`: User details (if authenticated)
+
+**Example:**
 ```typescript
-use_mcp_tool ib-api-tools auth.status {}
+use_mcp_tool ib-api-tools auth.status {
+  "accessToken": "your-access-token"
+}
 ```
+
+## OAuth Flow
+
+1. **Initiate Login**: Call `auth.login` to get authorization URL
+2. **User Authentication**: Visit the URL, select platform, and log in
+3. **Callback**: User is redirected with authorization code
+4. **Exchange Code**: Call `auth.exchange` with code and verifier
+5. **Use Token**: Call `auth.status` or API tools with access token
+
+## Environment Variables
+
+Required environment variables (see `.env.example`):
+
+- `OAUTH_BRIDGE_URL`: OAuth bridge service URL
+- `OAUTH_CLIENT_ID`: Client identifier for this MCP server
+- `OAUTH_REDIRECT_URI`: OAuth callback URL
+- `PORT`: Server port (default: 3000)
+- `NODE_ENV`: Environment (development/production)
+- `ALLOWED_ORIGINS`: CORS allowed origins
+- `ENABLE_DNS_REBINDING_PROTECTION`: Enable origin validation
+- `ALLOWED_HOSTS`: Allowed hostnames for DNS rebinding protection
+
+## Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+- **[Development Workflow](docs/development-workflow.md)**: Local development, testing, and deployment
+- **[Tech Stack](docs/techStack.md)**: Technology choices and architecture
+- **[Codebase Summary](docs/codebaseSummary.md)**: Project structure and components
+- **[Current Task](docs/currentTask.md)**: Current development status
+- **[Project Roadmap](docs/projectRoadmap.md)**: Goals and progress
+
+## Production Deployment
+
+For production deployment to EC2, see the [Development Workflow](docs/development-workflow.md#production-deployment-ec2) documentation.
+
+Key steps:
+1. Set up EC2 instance with Node.js and nginx
+2. Clone repository and build
+3. Configure production environment variables
+4. Start with PM2 process manager
+5. Configure nginx reverse proxy with SSL
+
+## Security
+
+- OAuth 2.0 with PKCE for secure authentication
+- HTTPS required for production
+- CORS configuration for allowed origins
+- DNS rebinding protection
+- Token expiry and refresh handling
+
+## Support
+
+- **Issues**: https://github.com/ibproduct/ib-api-tools-mcp-server/issues
+- **Documentation**: See `docs/` directory
+- **OAuth Bridge**: https://github.com/ibproduct/ib-oauth-bridge-experimental
 
 ## License
 

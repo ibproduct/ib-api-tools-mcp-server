@@ -1,206 +1,295 @@
 #!/usr/bin/env node
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  ErrorCode,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
-import open from 'open';
-import { ServerResult, SessionState, TokenResponse } from './types.js';
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { z } from 'zod';
 
-const sessionState: SessionState = {
-  token: null,
-  isAuthenticated: false,
-  sessionInfo: null
-};
+// Create Express app
+const app = express();
+app.use(express.json());
 
-class IBAuthServer {
-  private server: Server;
+// Configure CORS
+app.use(cors({
+    origin: process.env.ALLOWED_ORIGINS || '*',
+    exposedHeaders: ['Mcp-Session-Id'],
+    allowedHeaders: ['Content-Type', 'mcp-session-id']
+}));
 
-  constructor() {
-    this.server = new Server(
-      {
-        name: "IntelligenceBank API Tools",
-        version: "1.0.0"
-      },
-      {
-        capabilities: {
-          tools: {}
-        }
-      }
-    );
+// Create MCP server
+const server = new McpServer({
+    name: 'IntelligenceBank API Tools',
+    version: '0.1.0'
+});
 
-    this.setupToolHandlers();
-    
-    this.server.onerror = (error: Error): void => {
-      console.error('[MCP Error]', error);
-    };
-
-    process.on('SIGINT', async () => {
-      await this.server.close();
-      process.exit(0);
-    });
-  }
-
-  private setupToolHandlers(): void {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
-        {
-          name: 'auth.login',
-          description: 'Start browser login flow',
-          inputSchema: {
-            type: 'object',
-            properties: {}
-          }
+// Register authentication tools
+server.registerTool(
+    'auth.login',
+    {
+        title: 'OAuth Login',
+        description: 'Start OAuth 2.0 login flow with IntelligenceBank',
+        inputSchema: {
+            platformUrl: z.string().optional().describe('IntelligenceBank platform URL (e.g., https://company.intelligencebank.com)')
         },
-        {
-          name: 'auth.status',
-          description: 'Check authentication status',
-          inputSchema: {
-            type: 'object',
-            properties: {}
-          }
+        outputSchema: {
+            authorizationUrl: z.string(),
+            state: z.string(),
+            codeVerifier: z.string()
         }
-      ]
-    }));
+    },
+    async ({ platformUrl }) => {
+        // Generate PKCE parameters
+        const codeVerifier = generateCodeVerifier();
+        const codeChallenge = await generateCodeChallenge(codeVerifier);
+        const state = generateState();
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      switch (request.params.name) {
-        case 'auth.login':
-          return this.handleLogin();
-        case 'auth.status':
-          return this.handleStatus();
-        default:
-          throw new McpError(
-            ErrorCode.MethodNotFound,
-            `Unknown tool: ${request.params.name}`
-          );
-      }
-    });
-  }
+        const clientId = process.env.OAUTH_CLIENT_ID || 'ib-api-tools-mcp-server';
+        const redirectUri = process.env.OAUTH_REDIRECT_URI || 'http://localhost:3000/callback';
+        const bridgeUrl = process.env.OAUTH_BRIDGE_URL || 'https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev';
 
-  private async handleLogin(): Promise<ServerResult> {
+        // Build authorization URL
+        const params = new URLSearchParams({
+            response_type: 'code',
+            client_id: clientId,
+            redirect_uri: redirectUri,
+            scope: 'profile',
+            state,
+            code_challenge: codeChallenge,
+            code_challenge_method: 'S256'
+        });
+
+        if (platformUrl) {
+            params.append('platform_url', platformUrl);
+        }
+
+        const authorizationUrl = `${bridgeUrl}/authorize?${params.toString()}`;
+
+        const output = {
+            authorizationUrl,
+            state,
+            codeVerifier
+        };
+
+        return {
+            content: [{
+                type: 'text',
+                text: JSON.stringify(output, null, 2)
+            }],
+            structuredContent: output
+        };
+    }
+);
+
+server.registerTool(
+    'auth.exchange',
+    {
+        title: 'Exchange Authorization Code',
+        description: 'Exchange authorization code for access tokens',
+        inputSchema: {
+            code: z.string().describe('Authorization code from OAuth callback'),
+            codeVerifier: z.string().describe('PKCE code verifier from login'),
+            state: z.string().optional().describe('State parameter for validation')
+        },
+        outputSchema: {
+            accessToken: z.string(),
+            tokenType: z.string(),
+            expiresIn: z.number(),
+            refreshToken: z.string().optional()
+        }
+    },
+    async ({ code, codeVerifier }) => {
+        const clientId = process.env.OAUTH_CLIENT_ID || 'ib-api-tools-mcp-server';
+        const redirectUri = process.env.OAUTH_REDIRECT_URI || 'http://localhost:3000/callback';
+        const bridgeUrl = process.env.OAUTH_BRIDGE_URL || 'https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev';
+
+        try {
+            const response = await fetch(`${bridgeUrl}/token`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code,
+                    redirect_uri: redirectUri,
+                    client_id: clientId,
+                    code_verifier: codeVerifier
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `Token exchange failed: ${error.error_description || error.error}`
+                    }],
+                    isError: true
+                };
+            }
+
+            const tokens = await response.json();
+            const output = {
+                accessToken: tokens.access_token,
+                tokenType: tokens.token_type,
+                expiresIn: tokens.expires_in,
+                refreshToken: tokens.refresh_token
+            };
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify(output, null, 2)
+                }],
+                structuredContent: output
+            };
+        } catch (error) {
+            return {
+                content: [{
+                    type: 'text',
+                    text: `Error exchanging code: ${error instanceof Error ? error.message : 'Unknown error'}`
+                }],
+                isError: true
+            };
+        }
+    }
+);
+
+server.registerTool(
+    'auth.status',
+    {
+        title: 'Authentication Status',
+        description: 'Check current authentication status and user information',
+        inputSchema: {
+            accessToken: z.string().describe('Access token to validate')
+        },
+        outputSchema: {
+            authenticated: z.boolean(),
+            userInfo: z.object({
+                sub: z.string(),
+                name: z.string().optional(),
+                email: z.string().optional(),
+                ib_client_id: z.string().optional(),
+                ib_api_url: z.string().optional()
+            }).optional()
+        }
+    },
+    async ({ accessToken }) => {
+        const bridgeUrl = process.env.OAUTH_BRIDGE_URL || 'https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev';
+
+        try {
+            const response = await fetch(`${bridgeUrl}/userinfo`, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            });
+
+            if (!response.ok) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: JSON.stringify({ authenticated: false })
+                    }],
+                    structuredContent: { authenticated: false }
+                };
+            }
+
+            const userInfo = await response.json();
+            const output = {
+                authenticated: true,
+                userInfo
+            };
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify(output, null, 2)
+                }],
+                structuredContent: output
+            };
+        } catch (error) {
+            return {
+                content: [{
+                    type: 'text',
+                    text: `Error checking status: ${error instanceof Error ? error.message : 'Unknown error'}`
+                }],
+                isError: true
+            };
+        }
+    }
+);
+
+// MCP endpoint - POST for requests, GET for notifications
+app.post('/mcp', async (req, res) => {
     try {
-      // Get initial token
-      const tokenRes = await fetch(`${process.env.IB_API_URL}/v1/auth/app/token`);
-      const { content: token } = await tokenRes.json() as TokenResponse;
-      sessionState.token = token;
+        // Create new transport for each request (stateless mode)
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+            enableJsonResponse: true,
+            enableDnsRebindingProtection: process.env.ENABLE_DNS_REBINDING_PROTECTION === 'true',
+            allowedHosts: process.env.ALLOWED_HOSTS?.split(',') || []
+        });
 
-      // Open browser for login
-      const loginUrl = `${process.env.IB_API_URL}/auth/?login=0&token=${token}`;
-      await open(loginUrl);
+        res.on('close', () => {
+            transport.close();
+        });
 
-      // Start polling in background
-      this.startPolling(token);
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Browser login window opened. Please complete the login process."
-          }
-        ]
-      };
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
     } catch (error) {
-      console.error('Error starting auth flow:', error);
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Failed to start authentication flow. Please try again."
-          }
-        ],
-        _meta: {
-          error: error instanceof Error ? error.message : 'Unknown error'
+        console.error('Error handling MCP request:', error);
+        if (!res.headersSent) {
+            res.status(500).json({
+                jsonrpc: '2.0',
+                error: {
+                    code: -32603,
+                    message: 'Internal server error'
+                },
+                id: null
+            });
         }
-      };
     }
-  }
+});
 
-  private async handleStatus(): Promise<ServerResult> {
-    if (!sessionState.token) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Not authenticated. Use auth.login to start authentication flow."
-          }
-        ]
-      };
-    }
+// Start server
+const port = parseInt(process.env.PORT || '3000');
+app.listen(port, () => {
+    console.log(`IntelligenceBank API Tools MCP Server running on http://localhost:${port}/mcp`);
+    console.log('Available tools:');
+    console.log('  - auth.login: Start OAuth 2.0 login flow');
+    console.log('  - auth.exchange: Exchange authorization code for tokens');
+    console.log('  - auth.status: Check authentication status');
+}).on('error', (error) => {
+    console.error('Server error:', error);
+    process.exit(1);
+});
 
-    if (!sessionState.isAuthenticated) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Authentication in progress. Please complete login in your browser."
-          }
-        ]
-      };
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Successfully authenticated to IntelligenceBank."
-        }
-      ],
-      _meta: {
-        sessionInfo: sessionState.sessionInfo
-      }
-    };
-  }
-
-  private async startPolling(token: string): Promise<void> {
-    const pollInterval = 2000; // 2 seconds
-    const maxPollTime = 5 * 60 * 1000; // 5 minutes
-    const startTime = Date.now();
-
-    const pollTimer = setInterval(async () => {
-      try {
-        // Check if we've exceeded max poll time
-        if (Date.now() - startTime > maxPollTime) {
-          clearInterval(pollTimer);
-          sessionState.token = null;
-          sessionState.isAuthenticated = false;
-          console.error('Login flow expired');
-          return;
-        }
-
-        // Poll for session info
-        const infoRes = await fetch(`${process.env.IB_API_URL}/v1/auth/app/info?token=${token}`);
-        
-        if (infoRes.status === 404) {
-          // Still waiting for login
-          return;
-        }
-
-        if (infoRes.status === 200) {
-          // Login successful!
-          clearInterval(pollTimer);
-          const sessionInfo = await infoRes.json();
-          sessionState.isAuthenticated = true;
-          sessionState.sessionInfo = sessionInfo;
-          console.log('Login successful');
-          return;
-        }
-
-      } catch (error) {
-        console.error('Error polling for auth:', error);
-      }
-    }, pollInterval);
-  }
-
-  async run(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error('IntelligenceBank Auth MCP server running on stdio');
-  }
+// Helper functions
+function generateCodeVerifier(): string {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return btoa(String.fromCharCode(...array))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
 }
 
-const server = new IBAuthServer();
-server.run().catch(console.error);
+async function generateCodeChallenge(verifier: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+
+function generateState(): string {
+    const array = new Uint8Array(16);
+    crypto.getRandomValues(array);
+    return btoa(String.fromCharCode(...array))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
