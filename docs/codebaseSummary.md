@@ -28,7 +28,6 @@
 ├── tsconfig.json                # TypeScript configuration
 └── README.md                    # Project overview and quick start
 ```
-
 ## Architecture Overview
 
 ### Transport Layer
@@ -46,10 +45,13 @@
 
 ### Server Implementation
 - **Framework**: Express.js 4.21.2
-- **Runtime**: Node.js >= 18.0.0
+- **Runtime**: Node.js >= 24.0.0
 - **Language**: TypeScript 5.3.3
 - **Process Manager**: PM2 (production)
-- **Reverse Proxy**: nginx with SSL/TLS
+- **Deployment**: EC2 (i-0d648adfb366a8889, us-west-1)
+- **Domain**: mcp.connectingib.com
+- **Production Endpoint**: https://mcp.connectingib.com/mcp
+- **SSL/TLS**: Let's Encrypt certificate with nginx reverse proxy
 
 ## Key Components
 
@@ -223,15 +225,26 @@ Validates token and retrieves user information.
 
 ## Recent Changes
 
-### December 2024 - January 2025
-- Updated MCP SDK from v1.11.0 to v1.20.1
-- Removed Cloudflare Workers artifacts
-- Implemented Streamable HTTP transport
-- Integrated OAuth 2.0 with PKCE via bridge
-- Added Express.js HTTP server
-- Configured CORS and DNS rebinding protection
-- Created comprehensive deployment documentation
-- Updated all documentation to reflect new architecture
+### January 2025 - Production Deployment
+- **MCP SDK**: Updated from v1.11.0 to v1.20.1
+- **Architecture**: Removed Cloudflare Workers, implemented HTTP transport
+- **Authentication**: Integrated OAuth 2.0 with PKCE via bridge
+- **Server**: Express.js HTTP server with CORS and DNS rebinding protection
+- **Documentation**: Comprehensive overhaul of all docs
+- **Deployment**: Live on EC2 (52.9.99.47:3000/mcp)
+- **Status**: Verified and operational ✓
+
+### Production Instance Details
+- **Instance ID**: i-0d648adfb366a8889
+- **Region**: us-west-1
+- **IP**: 52.9.99.47 (Elastic IP: eipalloc-0bba57986860e351c)
+- **Domain**: mcp.connectingib.com
+- **Endpoint**: https://mcp.connectingib.com/mcp
+- **Node.js**: v24.10.0
+- **nginx**: 1.18.0 (reverse proxy with SSL/TLS)
+- **PM2**: Running ib-mcp-server process
+- **SSL**: Let's Encrypt (expires 2026-01-17, auto-renewal enabled)
+- **Verified**: MCP protocol initialize ✓, Tools list ✓, HTTPS ✓
 
 ## Development Workflow
 
@@ -243,15 +256,30 @@ Validates token and retrieves user information.
 5. Run: `npm run dev`
 6. Test with MCP Inspector or Claude desktop
 
-### Production Deployment
-1. SSH to EC2 instance
-2. Clone repository to `/opt/ib-api-tools-mcp-server`
-3. Install dependencies and build
-4. Configure production `.env`
-5. Start with PM2: `pm2 start dist/index.js`
-6. Configure nginx reverse proxy
-7. Set up SSL with Let's Encrypt
-8. Test with production URL
+### Production Deployment (Current)
+**Live Instance**: EC2 i-0d648adfb366a8889 in us-west-1
+
+1. **Access Production**:
+   ```bash
+   ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47
+   ```
+
+2. **Update Production**:
+   ```bash
+   cd /opt/ib-api-tools-mcp-server
+   sudo git pull origin main
+   sudo npm install
+   sudo npm run build
+   pm2 restart ib-mcp-server
+   ```
+
+3. **Verify Deployment**:
+   ```bash
+   curl -X POST https://mcp.connectingib.com/mcp \
+     -H "Content-Type: application/json" \
+     -H "Accept: application/json, text/event-stream" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
+   ```
 
 ## Testing Strategy
 
@@ -262,10 +290,11 @@ Validates token and retrieves user information.
 - Build Verification: `npm run build`
 
 ### Production Testing
-- Health Check: `curl https://mcp.intelligencebank.com/mcp`
-- Claude Desktop: Remote connection to production URL
-- OAuth Flow: Complete authentication cycle
-- SSL Verification: Certificate validity
+- **Health Check**: `curl -I https://mcp.connectingib.com/mcp`
+- **MCP Protocol**: POST requests with proper headers ✓
+- **Tools Available**: auth.login, auth.exchange, auth.status ✓
+- **SSL/TLS**: Let's Encrypt certificate verified ✓
+- **Claude Desktop**: Use `mcp_settings_production.json` configuration
 
 ## Future Enhancements
 

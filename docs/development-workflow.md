@@ -169,6 +169,124 @@ Restart Claude desktop and verify the connection.
 - **Testing**: Write tests for new tools and utilities
 - **Documentation**: All tools must have clear descriptions
 
+## Current Production Deployment
+
+### Live Instance Details
+
+**EC2 Instance:**
+- **Instance ID**: i-0d648adfb366a8889
+- **Region**: us-west-1
+- **AMI**: ami-04f34746e5e1ec0fe (Ubuntu 22.04 LTS)
+- **Public IP**: 52.9.99.47 (Elastic IP: eipalloc-0bba57986860e351c)
+- **Domain**: mcp.connectingib.com
+- **Security Group**: sg-016b96bf0ebfadfd2
+- **MCP Endpoint**: https://mcp.connectingib.com/mcp
+
+**Software Configuration:**
+- Node.js v24.10.0
+- nginx 1.18.0 (reverse proxy with SSL/TLS)
+- PM2 process manager (process: ib-mcp-server)
+- Let's Encrypt SSL certificate (auto-renewal enabled)
+- Installation path: `/opt/ib-api-tools-mcp-server`
+- Status: Running and verified ✓
+
+**Access:**
+```bash
+# SSH access
+ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47
+
+# Check PM2 status
+pm2 status
+pm2 logs ib-mcp-server
+
+# View recent logs
+pm2 logs ib-mcp-server --lines 50
+
+# Check nginx status
+sudo systemctl status nginx
+
+# Check SSL certificate
+sudo certbot certificates
+```
+
+**Production Environment (.env):**
+```bash
+OAUTH_BRIDGE_URL=https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev
+OAUTH_CLIENT_ID=ib-api-tools-mcp-server-prod
+OAUTH_REDIRECT_URI=https://mcp.connectingib.com/callback
+PORT=3000
+NODE_ENV=production
+ALLOWED_ORIGINS=*
+ENABLE_DNS_REBINDING_PROTECTION=false
+ALLOWED_HOSTS=localhost,mcp.connectingib.com,52.9.99.47
+```
+
+**Security Group Ports:**
+- 22 (SSH): Specific IPs including 49.185.106.0/32
+- 80 (HTTP): 0.0.0.0/0
+- 443 (HTTPS): 0.0.0.0/0
+- 3000 (MCP): 0.0.0.0/0
+- 4001 (Optional): 0.0.0.0/0
+
+**DNS Configuration:**
+- Route53 A record: mcp.connectingib.com → 52.9.99.47
+- Hosted Zone: Z03615543P0I2I61FMLSP (connectingib.com)
+
+**SSL/TLS Configuration:**
+- Certificate: Let's Encrypt
+- Certificate Path: `/etc/letsencrypt/live/mcp.connectingib.com/`
+- Expires: 2026-01-17
+- Auto-renewal: Enabled via systemd timer
+
+**nginx Configuration:**
+- Site config: `/etc/nginx/sites-available/ib-mcp-server`
+- Reverse proxy: localhost:3000
+- SSL termination with HTTP → HTTPS redirect
+- SSE/streaming support enabled
+
+**Verified Functionality:**
+```bash
+# Test HTTPS endpoint
+curl -I https://mcp.connectingib.com/mcp
+
+# MCP protocol initialize test
+curl -X POST https://mcp.connectingib.com/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}'
+
+# Tools list test
+curl -X POST https://mcp.connectingib.com/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+
+# Response: All three tools (auth.login, auth.exchange, auth.status) available ✓
+```
+
+### Updating Production Instance
+
+1. **Pull Latest Changes**
+   ```bash
+   ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47
+   cd /opt/ib-api-tools-mcp-server
+   sudo git config --global --add safe.directory /opt/ib-api-tools-mcp-server
+   sudo git pull origin main
+   sudo npm install
+   sudo npm run build
+   pm2 restart ib-mcp-server
+   pm2 logs ib-mcp-server --lines 20
+   ```
+
+2. **Verify Update**
+   ```bash
+   # Check HTTPS MCP endpoint is responding
+   curl -X POST https://mcp.connectingib.com/mcp \
+     -H "Content-Type: application/json" \
+     -H "Accept: application/json, text/event-stream" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}'
+   ```
+
 ## Production Deployment (EC2)
 
 ### Prerequisites
@@ -456,26 +574,29 @@ pm2 restart ib-mcp-server && sudo systemctl restart nginx
 ### Health Check
 
 ```bash
-curl https://mcp.intelligencebank.com/mcp
+curl -I https://mcp.connectingib.com/mcp
 ```
 
 ### MCP Inspector
 
 ```bash
-npx @modelcontextprotocol/inspector
+npx @modelcontextprotocol/inspector https://mcp.connectingib.com/mcp
 ```
-
-Connect to: `https://mcp.intelligencebank.com/mcp`
 
 ### Claude Desktop
 
 Update configuration to use production URL:
 
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
 ```json
 {
   "mcpServers": {
-    "ib-api-tools": {
-      "url": "https://mcp.intelligencebank.com/mcp"
+    "intelligencebank-api-tools": {
+      "url": "https://mcp.connectingib.com/mcp",
+      "transport": {
+        "type": "http"
+      }
     }
   }
 }

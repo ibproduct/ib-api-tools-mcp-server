@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "intelligencebank-api-tools": {
+      "url": "https://mcp.connectingib.com/mcp",
+      "transport": {
+        "type": "http"
+      }
+    }
+  }
+}

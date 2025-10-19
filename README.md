@@ -58,7 +58,7 @@ Add to your Claude desktop config:
 }
 ```
 
-For production deployment, use the production server URL (e.g., `https://mcp.intelligencebank.com/mcp`).
+For production deployment, use: `https://mcp.connectingib.com/mcp`
 
 ## Available Tools
 
@@ -153,14 +153,21 @@ Comprehensive documentation is available in the `docs/` directory:
 
 ## Production Deployment
 
-For production deployment to EC2, see the [Development Workflow](docs/development-workflow.md#production-deployment-ec2) documentation.
+**Live Production Server:**
+- **Endpoint**: https://mcp.connectingib.com/mcp
+- **Instance**: EC2 i-0d648adfb366a8889 (us-west-1)
+- **SSL**: Let's Encrypt certificate (auto-renewal enabled)
+- **Status**: Running and verified ✓
+
+For deployment details, see the [Development Workflow](docs/development-workflow.md#production-deployment-ec2) documentation.
 
 Key steps:
 1. Set up EC2 instance with Node.js and nginx
 2. Clone repository and build
 3. Configure production environment variables
 4. Start with PM2 process manager
-5. Configure nginx reverse proxy with SSL
+5. Configure nginx reverse proxy with SSL/TLS
+6. Set up DNS and SSL certificate
 
 ## Security
 

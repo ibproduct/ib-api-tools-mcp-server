@@ -10,7 +10,7 @@
   - Stateless mode support
 
 ### Runtime
-- **Node.js >= 18.0.0**
+- **Node.js >= 24.0.0** (Production: v24.10.0)
 - **TypeScript 5.3.3**
 - **ESM modules**
 
@@ -134,19 +134,29 @@ docs/
 - **Transport**: HTTP on localhost
 - **MCP Inspector**: Testing tool for development
 
-### Production (EC2)
-- **Node.js Server**: PM2 process manager
-- **Reverse Proxy**: nginx with SSL termination
-- **SSL/TLS**: Let's Encrypt certificates via certbot
-- **Domain**: Custom domain (e.g., mcp.intelligencebank.com)
-- **Firewall**: UFW with ports 22, 80, 443
+### Production (EC2 - Live)
+- **Instance**: i-0d648adfb366a8889 (us-west-1)
+- **Public IP**: 52.9.99.47 (Elastic IP: eipalloc-0bba57986860e351c)
+- **Domain**: mcp.connectingib.com
+- **Endpoint**: https://mcp.connectingib.com/mcp
+- **Node.js**: v24.10.0
+- **nginx**: 1.18.0 (reverse proxy with SSL termination)
+- **SSL**: Let's Encrypt (expires 2026-01-17, auto-renewal enabled)
+- **Process Manager**: PM2 (ib-mcp-server)
+- **Status**: Running and verified ✓
 
 ### Infrastructure Components
-- **EC2 Instance**: Ubuntu/Debian Linux
-- **nginx**: Reverse proxy and SSL termination
+- **EC2 Instance**: Ubuntu 22.04 LTS (ami-04f34746e5e1ec0fe)
 - **PM2**: Process manager with auto-restart
-- **Certbot**: Automated SSL certificate management
-- **CloudWatch**: Optional logging and monitoring
+- **nginx**: Reverse proxy with SSL termination
+- **Certbot**: Automated SSL certificate management (Let's Encrypt)
+- **Route53**: DNS management (hosted zone Z03615543P0I2I61FMLSP)
+- **Security Group**: sg-016b96bf0ebfadfd2 (ports 22, 80, 443, 3000, 4001)
+- **Installation Path**: /opt/ib-api-tools-mcp-server
+
+### Infrastructure Components (Planned)
+- **CloudWatch**: Logging and monitoring
+- **Load Balancer**: For high availability (future)
 
 ## Security Features
 
@@ -182,10 +192,16 @@ docs/
 - **Error Handling**: Test failure scenarios
 
 ### Production Testing
-- **Health Checks**: Server availability monitoring
-- **SSL Verification**: Certificate validity
-- **Claude Desktop**: Real-world client testing
-- **Performance**: Load and response time testing
+- **MCP Protocol**: Initialize and tools/list verified ✓
+- **HTTPS Endpoint**: curl POST to https://mcp.connectingib.com/mcp ✓
+- **SSL Certificate**: Let's Encrypt verified ✓
+- **Tools Available**: auth.login, auth.exchange, auth.status ✓
+- **Claude Desktop**: Configuration in mcp_settings_production.json
+- **Next**: End-to-end OAuth flow testing, Claude desktop integration
+
+### Production Testing (Future)
+- **Performance**: Load and response time benchmarking
+- **Monitoring**: Health checks and uptime tracking
 
 ## Performance Considerations
 

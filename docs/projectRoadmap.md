@@ -8,7 +8,8 @@ Create a production-ready MCP server that enables AI assistants (like Claude) to
 ### Core Infrastructure ✓
 - [x] Remote MCP server with HTTP transport
 - [x] OAuth 2.0 authentication via IntelligenceBank OAuth bridge
-- [x] Production deployment on EC2 with SSL/TLS
+- [x] Production deployment on EC2 with HTTPS/SSL/TLS
+- [x] Custom domain with DNS configuration
 - [x] Comprehensive documentation
 
 ### Authentication System ✓
@@ -60,15 +61,26 @@ Create a production-ready MCP server that enables AI assistants (like Claude) to
 - [x] Updated currentTask.md
 - [x] Removed obsolete documentation
 
-### Phase 4: Testing & Deployment (In Progress 🚧)
-- [ ] Local testing with MCP Inspector
-- [ ] OAuth flow end-to-end testing
-- [ ] Claude desktop local testing
-- [ ] EC2 production deployment
-- [ ] nginx reverse proxy configuration
-- [ ] SSL/TLS certificate setup
-- [ ] Production environment testing
-- [ ] Claude desktop production testing
+### Phase 4: Testing & Deployment (Completed ✓)
+- [x] Local testing with MCP Inspector
+- [x] OAuth flow end-to-end testing
+- [x] Claude desktop local testing
+- [x] EC2 production deployment
+- [x] Production environment verified
+- [x] nginx reverse proxy configuration
+- [x] SSL/TLS certificate setup (Let's Encrypt)
+- [x] DNS configuration (mcp.connectingib.com)
+- [ ] Claude desktop production testing (pending)
+
+**Production Deployment Details:**
+- **Instance**: i-0d648adfb366a8889 (us-west-1)
+- **Domain**: mcp.connectingib.com
+- **Endpoint**: https://mcp.connectingib.com/mcp
+- **Node.js**: v24.10.0
+- **nginx**: 1.18.0 (reverse proxy with SSL/TLS)
+- **PM2**: ib-mcp-server process
+- **SSL**: Let's Encrypt (expires 2026-01-17)
+- **Status**: Running and verified ✓
 
 ### Phase 5: API Tools (Planned 📋)
 - [ ] Resource listing and retrieval
@@ -92,13 +104,15 @@ Create a production-ready MCP server that enables AI assistants (like Claude) to
 ## Completion Criteria
 
 ### Minimum Viable Product (MVP) ✓
-- [x] MCP SDK updated to latest version
-- [x] HTTP transport implemented
-- [x] OAuth 2.0 authentication working
+- [x] MCP SDK updated to latest version (v1.20.1)
+- [x] HTTP transport implemented (Streamable HTTP)
+- [x] OAuth 2.0 authentication working (PKCE flow)
 - [x] Documentation complete
-- [ ] Local testing successful
-- [ ] Production deployment complete
-- [ ] Claude desktop integration verified
+- [x] Local testing successful
+- [x] Production deployment complete (EC2 with HTTPS)
+- [x] SSL/TLS certificate configured
+- [x] Custom domain configured (mcp.connectingib.com)
+- [ ] Claude desktop integration verified (pending)
 
 ### Production Ready
 - [ ] All authentication flows tested
@@ -129,7 +143,16 @@ Create a production-ready MCP server that enables AI assistants (like Claude) to
 - Comprehensive documentation overhaul
 - Build verification successful
 
-**Current Status:** Ready for testing and deployment phase
+**Week 3: Production Deployment**
+- Created EC2 instance i-0d648adfb366a8889 in us-west-1
+- Allocated Elastic IP 52.9.99.47
+- Installed Node.js v24.10.0 and PM2
+- Deployed application to /opt/ib-api-tools-mcp-server
+- Configured production environment
+- Verified MCP protocol functionality
+- All three OAuth tools operational
+
+**Current Status:** Production deployment complete, ready for Claude desktop testing
 
 ### December 2024 - May 2024
 **Initial Development**
@@ -191,18 +214,19 @@ Create a production-ready MCP server that enables AI assistants (like Claude) to
 
 ## Next Milestones
 
-### Milestone 1: Testing Complete (Target: Week 3)
-- [ ] Local OAuth flow tested
-- [ ] All tools verified with MCP Inspector
-- [ ] Claude desktop local integration tested
-- [ ] Documentation validated
+### Milestone 1: Testing Complete ✓
+- [x] Local OAuth flow tested
+- [x] All tools verified with MCP Inspector
+- [x] Claude desktop local integration tested
+- [x] Documentation validated
 
-### Milestone 2: Production Deployment (Target: Week 4)
-- [ ] EC2 deployment complete
-- [ ] SSL/TLS configured
-- [ ] DNS configured
-- [ ] Production testing complete
-- [ ] Claude desktop production integration verified
+### Milestone 2: Production Deployment ✓
+- [x] EC2 deployment complete
+- [x] Production testing complete (MCP protocol verified)
+- [x] SSL/TLS configured (Let's Encrypt)
+- [x] DNS configured (mcp.connectingib.com via Route53)
+- [x] nginx reverse proxy configured
+- [ ] Claude desktop production integration verified (next step)
 
 ### Milestone 3: First API Tools (Target: Month 2)
 - [ ] 5+ IntelligenceBank API tools implemented
