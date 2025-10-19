@@ -1,399 +1,855 @@
-# Current Task: Automatic OAuth Callback Flow Implementation
+# Current Task: MCP Server Architecture Refactoring
 
-## Objective
-Implement seamless OAuth 2.0 authentication with automatic token exchange via callback endpoint, eliminating manual code extraction and providing a polished user experience.
+## Executive Summary
 
-## Current State
-- **MCP SDK**: v1.20.1 with Streamable HTTP transport ✓
-- **OAuth Flow**: Automatic callback-based authentication ✓
-- **Session Management**: In-memory session tracking with TTL ✓
-- **Callback Endpoint**: GET /callback with automatic token exchange ✓
-- **Token Refresh**: Automatic refresh on API calls ✓
-- **Build Status**: Successfully compiled ✓
-- **Documentation**: Fully updated with new OAuth flow ✓
-- **Production Deployment**: Live on EC2 with HTTPS (https://mcp.connectingib.com/mcp) ✓
-- **Status**: Implementation complete, ready for testing and deployment
+The IntelligenceBank API Tools MCP server requires comprehensive architectural refactoring to transform from a monolithic 916-line file into a modular, scalable, and maintainable codebase. This refactoring will enable rapid tool development, improve testability, and align with MCP SDK best practices while maintaining production stability.
 
-## Completed Work
+## Problem Analysis
 
-### Phase 1: Clean Up & Dependencies ✓
-- [x] Updated MCP SDK to v1.20.1
-- [x] Reviewed current implementation
-- [x] Removed Cloudflare Workers artifacts
-- [x] Added Express.js, CORS, dotenv dependencies
-- [x] Updated package.json with new dependencies and version
+### Current Architecture Issues
 
-### Phase 2: HTTP Transport Implementation ✓
-- [x] Replaced stdio transport with Streamable HTTP transport
-- [x] Created Express server with POST/GET endpoints at `/mcp`
-- [x] Implemented stateless mode (new transport per request)
-- [x] Added CORS configuration for browser access
-- [x] Added DNS rebinding protection
+1. **Monolithic Structure (916 lines in index.ts)**
+   - All functionality crammed into a single file
+   - Session management, OAuth handling, tool definitions, Express setup, and utilities mixed together
+   - Violates single responsibility principle
+   - Makes code review and debugging difficult
 
-### Phase 3: OAuth Bridge Integration ✓
-- [x] Implemented OAuth 2.0 authorization flow with PKCE
-- [x] Created OAuth client configuration
-- [x] Implemented authentication tools
-- [x] Implemented JWT token handling
-- [x] Created helper functions for PKCE
+2. **Poor Tool Extensibility**
+   - Tools hardcoded directly in server initialization (lines 448-832)
+   - Adding a new tool requires modifying the monolithic file
+   - No consistent tool interface or validation
+   - Tool logic mixed with server infrastructure
 
-### Phase 4: Production Deployment ✓
-- [x] Created EC2 instance (i-0d648adfb366a8889)
-- [x] Allocated Elastic IP (52.9.99.47)
-- [x] Installed Node.js 24.10.0 and PM2
-- [x] Deployed code to `/opt/ib-api-tools-mcp-server`
-- [x] Configured security group
-- [x] Verified MCP protocol endpoint
+3. **Session Management Coupling**
+   - In-memory session storage embedded in main file (lines 13-64)
+   - Session cleanup logic mixed with server setup
+   - No abstraction for future Redis/persistent storage
+   - Session-related functions scattered throughout
 
-### Phase 5: HTTPS and SSL/TLS Configuration ✓
-- [x] Configured DNS A record (mcp.connectingib.com → 52.9.99.47)
-- [x] Installed and configured nginx as reverse proxy
-- [x] Obtained Let's Encrypt SSL certificate via certbot
-- [x] Configured automatic certificate renewal
-- [x] Updated production .env with HTTPS URLs
-- [x] Verified HTTPS endpoint responding correctly
+4. **OAuth Complexity**
+   - OAuth callback handler spans 108 lines (84-191)
+   - HTML generation embedded inline (197-433)
+   - Token refresh logic buried in tool implementation (589-646)
+   - No separation between OAuth logic and HTTP handling
 
-### Phase 6: Automatic OAuth Callback Implementation ✓
-- [x] Designed session-based authentication storage mechanism
-- [x] Implemented GET /callback endpoint to handle OAuth redirects
-- [x] Implemented automatic authorization code exchange in callback
-- [x] Created in-memory session storage with 5-minute TTL
-- [x] Modified auth_login to return sessionId instead of PKCE parameters
-- [x] Created beautiful HTML success page for authentication confirmation
-- [x] Created beautiful HTML error page with troubleshooting
-- [x] Enhanced auth_status for dual-mode operation (session polling + token validation)
-- [x] Implemented automatic token refresh functionality
-- [x] Added api_call tool for authenticated API requests
-- [x] Implemented session cleanup mechanism (runs every minute)
-- [x] Added retry logic and error handling for API calls
-- [x] Deprecated auth_exchange tool (no longer needed)
+5. **Type Safety Gaps**
+   - Minimal type definitions in types.ts
+   - Tool input/output schemas defined inline with Zod
+   - No shared interfaces for common patterns
+   - Type assertions and any types scattered throughout
 
-### Phase 7: Documentation Update ✓
-- [x] Updated README.md with new automatic OAuth flow
-- [x] Created comprehensive oauth-automatic-flow.md documentation
-- [x] Updated currentTask.md to reflect new implementation
-- [x] Updated codebaseSummary.md (pending)
-- [x] Updated techStack.md (pending)
-- [x] Updated projectRoadmap.md (pending)
-- [x] Updated development-workflow.md (pending)
+6. **Testing Challenges**
+   - Monolithic structure makes unit testing nearly impossible
+   - No dependency injection for mocking
+   - Business logic mixed with infrastructure
+   - Tools can't be tested in isolation
 
-## Production Deployment Details
+## Proposed Architecture
 
-### EC2 Instance
-- **Instance ID**: i-0d648adfb366a8889
-- **Public IP**: 52.9.99.47 (Elastic IP: eipalloc-0bba57986860e351c)
-- **Domain**: mcp.connectingib.com (Route53 A record)
-- **Region**: us-west-1
-- **AMI**: ami-04f34746e5e1ec0fe (Ubuntu 22.04 LTS)
-- **Instance Type**: t2.micro (or similar)
-- **Security Group**: sg-016b96bf0ebfadfd2
+### Design Principles
 
-### Deployment Configuration
-- **Node.js**: v24.10.0
-- **Process Manager**: PM2 (ib-mcp-server)
-- **Reverse Proxy**: nginx 1.18.0 with SSL/TLS
-- **SSL Certificate**: Let's Encrypt (expires 2026-01-17, auto-renewal enabled)
-- **Installation Path**: `/opt/ib-api-tools-mcp-server`
-- **MCP Endpoint**: `https://mcp.connectingib.com/mcp`
-- **Environment**: Production (.env configured with HTTPS URLs)
+1. **Separation of Concerns**: Each module handles exactly one responsibility
+2. **Plugin Architecture**: Tools as self-contained, discoverable plugins
+3. **Dependency Injection**: Loose coupling with constructor injection
+4. **Type-First Development**: Comprehensive TypeScript interfaces
+5. **MCP SDK Alignment**: Follow official patterns and best practices
+6. **Testability**: Every component independently testable
+7. **Progressive Enhancement**: Refactor incrementally without breaking changes
 
-### Verified Functionality
-```bash
-# HTTPS endpoint health check
-curl -I https://mcp.connectingib.com/mcp
-# Response: 200 OK with SSL certificate ✓
-
-# MCP protocol initialize test
-curl -X POST https://mcp.connectingib.com/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}'
-# Response: Server info with protocol version and capabilities ✓
-
-# Tools list test
-curl -X POST https://mcp.connectingib.com/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-# Response: Three tools (auth_login, auth_exchange, auth_status) ✓
-```
-
-## Remaining Tasks
-
-### Testing Phase
-- [ ] Test with MCP Inspector on HTTPS production endpoint
-- [ ] Complete OAuth flow end-to-end on production:
-  - [ ] Call `auth_login` tool
-  - [ ] Visit authorization URL in browser
-  - [ ] Complete OAuth flow on IB platform
-  - [ ] Call `auth_exchange` with code and verifier
-  - [ ] Call `auth_status` with access token
-- [ ] Test in Claude desktop with production server (HTTPS)
-- [ ] Verify error handling and edge cases
-
-### Optional Future Enhancements
-- [ ] Configure firewall (UFW) for additional security
-- [ ] Set up CloudWatch monitoring and alerts
-- [ ] Implement automatic token refresh logic
-- [ ] Add rate limiting middleware
-- [ ] Set up log aggregation service
-
-## Implementation Details
-
-### Transport: Streamable HTTP
-- **POST** `/mcp` - Client-to-server messages (JSON-RPC requests/responses/notifications)
-- **GET** `/mcp` - Server-to-client notifications via SSE (optional)
-- **Stateless mode**: New transport instance per request to prevent request ID collisions
-- **CORS enabled**: Configurable origins via ALLOWED_ORIGINS environment variable
-- **DNS rebinding protection**: Origin and host validation for security
-
-### Authentication: OAuth 2.0 via Bridge
-- **Bridge URL**: `https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev/`
-- **Flow**: Authorization code with PKCE (Proof Key for Code Exchange)
-- **Endpoints**:
-  - `/authorize` - Start OAuth flow with PKCE parameters
-  - `/token` - Exchange code for tokens with PKCE verification
-  - `/proxy/{platform-domain}/{api-path}` - Proxied IB API calls (future)
-  - `/userinfo` - Validate token and get user information
-- **Token Management**:
-  - JWT access tokens (1 hour expiry)
-  - Refresh tokens for session renewal (future implementation)
-  - Client-managed token storage
-- **PKCE Implementation**:
-  - code_verifier: 32-byte random base64url string
-  - code_challenge: SHA-256 hash of code_verifier
-  - state: 16-byte random base64url for CSRF protection
-
-### Deployment: EC2 Server with HTTPS
-- **Infrastructure**: EC2 instance i-0d648adfb366a8889 (us-west-1)
-- **Public IP**: 52.9.99.47 (Elastic IP)
-- **Domain**: mcp.connectingib.com (Route53)
-- **Endpoint**: https://mcp.connectingib.com/mcp
-- **Reverse Proxy**: nginx with SSL/TLS termination
-- **SSL Certificate**: Let's Encrypt (auto-renewal enabled)
-- **Process Manager**: PM2 (ib-mcp-server process)
-- **Environment**: Production .env with HTTPS OAuth configuration
-- **Node.js**: v24.10.0
-- **Status**: Running and verified ✓
-
-## Architecture Overview
+### Target Directory Structure
 
 ```
-Claude Desktop/Client
-    ↓ HTTP POST (JSON-RPC)
-MCP Server (Express on EC2)
-    ↓ OAuth 2.0 Flow
-OAuth Bridge (AWS Lambda)
-    ↓ Authenticated Proxy
-IntelligenceBank API
+src/
+├── index.ts                    # Minimal bootstrap (~30 lines)
+├── server/
+│   ├── MCPServer.ts            # MCP server wrapper class
+│   ├── ExpressApp.ts           # Express application setup
+│   └── transport.ts            # Transport configuration
+├── auth/
+│   ├── OAuthHandler.ts         # OAuth callback handling
+│   ├── SessionManager.ts       # Session lifecycle management
+│   ├── TokenManager.ts         # Token refresh and validation
+│   └── types.ts                # Auth-specific types
+├── tools/
+│   ├── registry.ts             # Tool registration system
+│   ├── base.ts                 # BaseTool abstract class
+│   ├── auth/
+│   │   ├── LoginTool.ts        # OAuth login initiation
+│   │   ├── StatusTool.ts       # Authentication status
+│   │   └── index.ts            # Auth tools exports
+│   └── api/
+│       ├── ApiCallTool.ts      # API call with auto-refresh
+│       └── index.ts             # API tools exports
+├── utils/
+│   ├── crypto.ts               # PKCE and crypto utilities
+│   ├── html.ts                 # HTML page generators
+│   └── http.ts                 # HTTP utilities
+├── types/
+│   ├── index.ts                # Core type definitions
+│   ├── tool.ts                 # Tool interfaces
+│   ├── session.ts              # Session types
+│   └── oauth.ts                # OAuth types
+└── config/
+    ├── index.ts                # Configuration loader
+    └── validation.ts           # Environment validation
 ```
 
-## Implemented Tools
+## Detailed Implementation Plan
 
-### 1. auth_login
-Initiates OAuth 2.0 authorization flow with automatic callback handling.
+### Phase 1: Foundation Layer (Week 1)
 
-**Implementation:**
-- Generates sessionId for tracking
-- Generates PKCE parameters (code_verifier, code_challenge, state)
-- Stores session with 5-minute TTL
-- Constructs authorization URL
-- Returns URL, sessionId, and user instructions
+#### 1.1 Core Type System
 
-**Input Schema:**
+**Create `src/types/tool.ts`:**
 ```typescript
-{
-  platformUrl?: string  // Optional IB instance URL
+import { z } from 'zod';
+
+export interface ToolMetadata {
+  name: string;
+  title: string;
+  description: string;
+  version?: string;
+  tags?: string[];
+}
+
+export interface ToolContext {
+  sessionManager: SessionManager;
+  tokenManager: TokenManager;
+  config: AppConfig;
+}
+
+export interface ToolResult<T = any> {
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: T;
+}
+
+export abstract class BaseTool<TInput = any, TOutput = any> {
+  abstract readonly metadata: ToolMetadata;
+  abstract readonly inputSchema: z.ZodSchema<TInput>;
+  abstract readonly outputSchema: z.ZodSchema<TOutput>;
+  
+  abstract execute(
+    input: TInput, 
+    context: ToolContext
+  ): Promise<ToolResult<TOutput>>;
+  
+  protected formatResult(data: TOutput): ToolResult<TOutput> {
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify(data, null, 2)
+      }],
+      structuredContent: data
+    };
+  }
 }
 ```
 
-**Output:**
+#### 1.2 Session Management Extraction
+
+**Create `src/auth/SessionManager.ts`:**
 ```typescript
-{
-  authorizationUrl: string,  // URL to visit for authentication
-  sessionId: string,         // Session ID for tracking
-  instructions: string       // User-friendly next steps
+export class SessionManager {
+  private sessions = new Map<string, AuthSession>();
+  private cleanupInterval: NodeJS.Timer;
+  
+  constructor(
+    private readonly ttl: number = 5 * 60 * 1000,
+    private readonly cleanupPeriod: number = 60 * 1000
+  ) {
+    this.startCleanup();
+  }
+  
+  create(params: SessionParams): string {
+    const sessionId = this.generateSessionId();
+    const session: AuthSession = {
+      ...params,
+      sessionId,
+      status: 'pending',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + this.ttl
+    };
+    this.sessions.set(sessionId, session);
+    return sessionId;
+  }
+  
+  get(sessionId: string): AuthSession | undefined {
+    return this.sessions.get(sessionId);
+  }
+  
+  findByState(state: string): AuthSession | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.state === state) {
+        return session;
+      }
+    }
+    return undefined;
+  }
+  
+  update(sessionId: string, updates: Partial<AuthSession>): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      Object.assign(session, updates);
+    }
+  }
+  
+  private startCleanup(): void {
+    this.cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [id, session] of this.sessions) {
+        if (session.expiresAt < now) {
+          this.sessions.delete(id);
+        }
+      }
+    }, this.cleanupPeriod);
+  }
+  
+  dispose(): void {
+    clearInterval(this.cleanupInterval);
+  }
 }
 ```
 
-**User Flow:**
-1. User receives authorization URL and sessionId
-2. User visits URL in browser
-3. User authenticates on IntelligenceBank platform
-4. OAuth bridge redirects to `/callback`
-5. Server automatically exchanges code for tokens
-6. User sees success page
-7. User tells Claude to check auth status
-8. Claude polls `auth_status` with sessionId
+#### 1.3 Tool Registry System
 
-### 2. auth_status
-Checks authentication status and retrieves tokens/user information.
-
-**Implementation:**
-- Looks up session by sessionId
-- Returns current status (pending/completed/error)
-- Returns tokens and userInfo when authentication is complete
-- Includes IntelligenceBank API session data (`clientid`, `apiV3url`, `sid`)
-
-**Input Schema:**
+**Create `src/tools/registry.ts`:**
 ```typescript
-{
-  sessionId: string  // Session ID from auth_login
+export class ToolRegistry {
+  private tools = new Map<string, BaseTool>();
+  private initialized = false;
+  
+  register(tool: BaseTool): void {
+    if (this.initialized) {
+      throw new Error('Cannot register tools after initialization');
+    }
+    
+    const { name } = tool.metadata;
+    if (this.tools.has(name)) {
+      throw new Error(`Tool "${name}" is already registered`);
+    }
+    
+    this.tools.set(name, tool);
+  }
+  
+  registerAll(tools: BaseTool[]): void {
+    tools.forEach(tool => this.register(tool));
+  }
+  
+  getAll(): BaseTool[] {
+    return Array.from(this.tools.values());
+  }
+  
+  get(name: string): BaseTool | undefined {
+    return this.tools.get(name);
+  }
+  
+  initialize(): void {
+    this.initialized = true;
+  }
+  
+  async execute(
+    name: string, 
+    input: any, 
+    context: ToolContext
+  ): Promise<ToolResult> {
+    const tool = this.tools.get(name);
+    if (!tool) {
+      throw new Error(`Tool "${name}" not found`);
+    }
+    
+    const validatedInput = tool.inputSchema.parse(input);
+    return tool.execute(validatedInput, context);
+  }
 }
 ```
 
-**Output:**
+### Phase 2: Tool Migration (Week 1-2)
+
+#### 2.1 Login Tool Implementation
+
+**Create `src/tools/auth/LoginTool.ts`:**
 ```typescript
-{
-  status: 'pending' | 'completed' | 'error',
-  authenticated: boolean,
-  tokens?: {
-    accessToken: string,
-    refreshToken: string,
-    tokenType: string,
-    expiresIn: number
-  },
-  userInfo?: {
-    name: string,
-    email: string,
-    sub: string,
-    clientid: string,      // IB client/company ID
-    apiV3url: string,      // IB API base URL
-    sid: string,           // IB session ID
-    // ... other fields
-  },
-  error?: string,
-  errorDescription?: string
+export class LoginTool extends BaseTool<LoginInput, LoginOutput> {
+  readonly metadata = {
+    name: 'auth_login',
+    title: 'OAuth Login',
+    description: 'Start OAuth 2.0 login flow with IntelligenceBank',
+    version: '1.1.0',
+    tags: ['auth', 'oauth']
+  };
+  
+  readonly inputSchema = z.object({
+    platformUrl: z.string().optional()
+      .describe('IntelligenceBank platform URL')
+  });
+  
+  readonly outputSchema = z.object({
+    authorizationUrl: z.string(),
+    sessionId: z.string(),
+    instructions: z.string()
+  });
+  
+  async execute(
+    input: LoginInput, 
+    context: ToolContext
+  ): Promise<ToolResult<LoginOutput>> {
+    const { sessionManager, config } = context;
+    
+    // Generate PKCE parameters
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+    const state = generateState();
+    
+    // Create session
+    const sessionId = sessionManager.create({
+      codeVerifier,
+      state,
+      clientId: config.oauth.clientId,
+      redirectUri: config.oauth.redirectUri
+    });
+    
+    // Build authorization URL
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: config.oauth.clientId,
+      redirect_uri: config.oauth.redirectUri,
+      scope: 'profile',
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256'
+    });
+    
+    if (input.platformUrl) {
+      params.append('platform_url', input.platformUrl);
+    }
+    
+    const authorizationUrl = `${config.oauth.bridgeUrl}/authorize?${params}`;
+    
+    return this.formatResult({
+      authorizationUrl,
+      sessionId,
+      instructions: 'Please visit the authorization URL to complete authentication.'
+    });
+  }
 }
 ```
 
-**Critical Data Stored:**
-- `clientid`: Used to construct IB API endpoints
-- `apiV3url`: Base URL for all IB API v3 calls
-- `sid`: IntelligenceBank session ID (included in API request headers)
+#### 2.2 OAuth Handler Extraction
 
-### 3. api_call (Temporary/Reference Implementation)
-Makes authenticated API calls with automatic token refresh.
-
-**Implementation:**
-- Retrieves session by sessionId
-- Makes API call with current access token
-- Automatically refreshes token on 401 errors
-- Retries request once after refresh
-- Detects session expiry and prompts re-authentication
-
-**Input Schema:**
+**Create `src/auth/OAuthHandler.ts`:**
 ```typescript
-{
-  sessionId: string,
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
-  path: string,           // API endpoint path
-  body?: object,          // Request body (for POST/PUT/PATCH)
-  headers?: object        // Additional headers
+export class OAuthHandler {
+  constructor(
+    private readonly sessionManager: SessionManager,
+    private readonly tokenManager: TokenManager,
+    private readonly config: OAuthConfig
+  ) {}
+  
+  async handleCallback(req: Request, res: Response): Promise<void> {
+    const { code, state, error, error_description } = req.query;
+    
+    if (error) {
+      await this.handleError(res, state, error, error_description);
+      return;
+    }
+    
+    if (!code || !state) {
+      res.status(400).send(generateErrorPage(
+        'invalid_request',
+        'Missing required parameters'
+      ));
+      return;
+    }
+    
+    const session = this.sessionManager.findByState(state as string);
+    if (!session) {
+      res.status(400).send(generateErrorPage(
+        'invalid_state',
+        'Invalid or expired session'
+      ));
+      return;
+    }
+    
+    try {
+      // Exchange code for tokens
+      const tokens = await this.tokenManager.exchangeCode(
+        code as string,
+        session
+      );
+      
+      // Fetch user information
+      const userInfo = await this.tokenManager.getUserInfo(
+        tokens.access_token
+      );
+      
+      // Update session
+      this.sessionManager.update(session.sessionId, {
+        status: 'completed',
+        tokens,
+        userInfo
+      });
+      
+      res.send(generateSuccessPage(userInfo));
+      
+    } catch (error) {
+      this.sessionManager.update(session.sessionId, {
+        status: 'error',
+        error: 'token_exchange_failed',
+        errorDescription: error.message
+      });
+      
+      res.send(generateErrorPage(
+        'token_exchange_failed',
+        error.message
+      ));
+    }
+  }
 }
 ```
 
-**Output:**
+### Phase 3: Server Architecture (Week 2)
+
+#### 3.1 MCP Server Wrapper
+
+**Create `src/server/MCPServer.ts`:**
 ```typescript
-{
-  success: boolean,
-  status: number,
-  data?: any,
-  error?: string
+export class MCPServerWrapper {
+  private server: McpServer;
+  
+  constructor(
+    private readonly toolRegistry: ToolRegistry,
+    private readonly context: ToolContext
+  ) {
+    this.server = new McpServer({
+      name: 'IntelligenceBank API Tools',
+      version: '1.0.0'
+    });
+  }
+  
+  async initialize(): Promise<void> {
+    // Register all tools from registry
+    for (const tool of this.toolRegistry.getAll()) {
+      this.registerTool(tool);
+    }
+    
+    this.toolRegistry.initialize();
+  }
+  
+  private registerTool(tool: BaseTool): void {
+    const { name, title, description } = tool.metadata;
+    
+    this.server.registerTool(
+      name,
+      {
+        title,
+        description,
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema
+      },
+      async (input) => {
+        return this.toolRegistry.execute(name, input, this.context);
+      }
+    );
+  }
+  
+  async connect(transport: any): Promise<void> {
+    await this.server.connect(transport);
+  }
 }
 ```
 
-**Note:** This is a temporary generic tool. Future specific IB API tools will implement the same token refresh pattern but with typed parameters and responses.
+#### 3.2 Express Application
 
-### Removed Tools
+**Create `src/server/ExpressApp.ts`:**
+```typescript
+export class ExpressApplication {
+  private app: Express;
+  
+  constructor(
+    private readonly sessionManager: SessionManager,
+    private readonly oauthHandler: OAuthHandler,
+    private readonly mcpServer: MCPServerWrapper,
+    private readonly config: AppConfig
+  ) {
+    this.app = express();
+    this.setupMiddleware();
+    this.setupRoutes();
+  }
+  
+  private setupMiddleware(): void {
+    this.app.use(express.json());
+    this.app.use(cors({
+      origin: this.config.cors.origins,
+      exposedHeaders: ['Mcp-Session-Id'],
+      allowedHeaders: ['Content-Type', 'mcp-session-id']
+    }));
+  }
+  
+  private setupRoutes(): void {
+    this.app.get('/callback', (req, res) => 
+      this.oauthHandler.handleCallback(req, res)
+    );
+    
+    this.app.post('/mcp', (req, res) => 
+      this.handleMCPRequest(req, res)
+    );
+  }
+  
+  private async handleMCPRequest(req: Request, res: Response): Promise<void> {
+    try {
+      const transport = new StreamableHTTPServerTransport({
+        enableJsonResponse: true,
+        enableDnsRebindingProtection: this.config.security.dnsRebinding,
+        allowedHosts: this.config.security.allowedHosts
+      });
+      
+      res.on('close', () => transport.close());
+      
+      await this.mcpServer.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+      
+    } catch (error) {
+      console.error('MCP request error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: { code: -32603, message: 'Internal server error' },
+          id: null
+        });
+      }
+    }
+  }
+  
+  listen(port: number): Server {
+    return this.app.listen(port);
+  }
+}
+```
 
-**auth_exchange** - Deprecated and removed. The `/callback` endpoint now handles authorization code exchange automatically. No longer needed in the new automatic flow.
+#### 3.3 Minimal Bootstrap
 
-## Environment Variables
+**New `src/index.ts` (~30 lines):**
+```typescript
+#!/usr/bin/env node
+import 'dotenv/config';
+import { ExpressApplication } from './server/ExpressApp.js';
+import { MCPServerWrapper } from './server/MCPServer.js';
+import { SessionManager } from './auth/SessionManager.js';
+import { TokenManager } from './auth/TokenManager.js';
+import { OAuthHandler } from './auth/OAuthHandler.js';
+import { ToolRegistry } from './tools/registry.js';
+import { loadConfig } from './config/index.js';
+import { registerAuthTools, registerApiTools } from './tools/index.js';
 
-```bash
-# OAuth Bridge Configuration
-OAUTH_BRIDGE_URL=https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev
-OAUTH_CLIENT_ID=ib-api-tools-mcp-server-{generated-uuid}
-OAUTH_REDIRECT_URI=http://localhost:3000/callback  # Local dev
-# OAUTH_REDIRECT_URI=https://mcp.connectingib.com/callback  # Production (HTTPS)
+async function bootstrap() {
+  const config = loadConfig();
+  
+  // Initialize core services
+  const sessionManager = new SessionManager();
+  const tokenManager = new TokenManager(config.oauth);
+  const oauthHandler = new OAuthHandler(sessionManager, tokenManager, config);
+  
+  // Register tools
+  const toolRegistry = new ToolRegistry();
+  registerAuthTools(toolRegistry);
+  registerApiTools(toolRegistry);
+  
+  // Create servers
+  const context = { sessionManager, tokenManager, config };
+  const mcpServer = new MCPServerWrapper(toolRegistry, context);
+  const app = new ExpressApplication(sessionManager, oauthHandler, mcpServer, config);
+  
+  // Start server
+  await mcpServer.initialize();
+  const port = config.server.port;
+  app.listen(port);
+  console.log(`MCP Server running on port ${port}`);
+}
 
-# MCP Server Configuration
-PORT=3000
-NODE_ENV=development  # or production
-ALLOWED_ORIGINS=*  # Configure for production
+bootstrap().catch(console.error);
+```
 
-# DNS Rebinding Protection
-ENABLE_DNS_REBINDING_PROTECTION=true
-ALLOWED_HOSTS=127.0.0.1,localhost
+## Implementation Strategy
+
+### Migration Approach
+
+1. **Feature Flags for Safe Rollout**
+   ```typescript
+   const USE_NEW_ARCHITECTURE = process.env.NEW_ARCH === 'true';
+   
+   if (USE_NEW_ARCHITECTURE) {
+     require('./index.new.ts');
+   } else {
+     require('./index.old.ts');
+   }
+   ```
+
+2. **Parallel Implementation**
+   - Keep existing index.ts as index.old.ts
+   - Build new architecture alongside
+   - Switch via environment variable
+   - No breaking changes during migration
+
+3. **Incremental Testing**
+   - Test each component in isolation
+   - Integration tests for OAuth flow
+   - Load testing for session management
+   - End-to-end tests with MCP Inspector
+
+### EC2 Deployment Considerations
+
+#### Zero-Downtime Deployment Strategy
+
+1. **Blue-Green Deployment**
+   ```bash
+   # Deploy to staging directory
+   scp dist.tar.gz ubuntu@52.9.99.47:/tmp/
+   ssh ubuntu@52.9.99.47 << 'EOF'
+     cd /opt
+     mkdir -p ib-mcp-server-new
+     tar -xzf /tmp/dist.tar.gz -C ib-mcp-server-new
+     
+     # Test new version
+     cd ib-mcp-server-new
+     npm install --production
+     PORT=3001 npm start &
+     sleep 5
+     curl -f http://localhost:3001/mcp || exit 1
+     
+     # Switch nginx upstream
+     sudo sed -i 's/localhost:3000/localhost:3001/' /etc/nginx/sites-available/ib-mcp-server
+     sudo nginx -s reload
+     
+     # Stop old version
+     pm2 stop ib-mcp-server
+     
+     # Move new to production
+     mv /opt/ib-api-tools-mcp-server /opt/ib-mcp-server-old
+     mv /opt/ib-mcp-server-new /opt/ib-api-tools-mcp-server
+     
+     # Start with PM2
+     pm2 start /opt/ib-api-tools-mcp-server/dist/index.js --name ib-mcp-server
+     pm2 save
+   EOF
+   ```
+
+2. **Rollback Plan**
+   ```bash
+   # Quick rollback if issues detected
+   ssh ubuntu@52.9.99.47 << 'EOF'
+     pm2 stop ib-mcp-server
+     mv /opt/ib-api-tools-mcp-server /opt/ib-mcp-server-failed
+     mv /opt/ib-mcp-server-old /opt/ib-api-tools-mcp-server
+     pm2 start /opt/ib-api-tools-mcp-server/dist/index.js --name ib-mcp-server
+   EOF
+   ```
+
+3. **Session Preservation**
+   - Implement session export/import during deployment
+   - Use Redis for persistent sessions (future)
+   - Grace period for in-flight OAuth flows
+
+#### Build Process Updates
+
+**Updated package.json scripts:**
+```json
+{
+  "scripts": {
+    "build": "tsc",
+    "build:production": "tsc && npm run bundle",
+    "bundle": "esbuild dist/index.js --bundle --platform=node --outfile=dist/bundle.js",
+    "test": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "deploy:staging": "./scripts/deploy-staging.sh",
+    "deploy:production": "./scripts/deploy-production.sh"
+  }
+}
 ```
 
 ## Testing Strategy
 
-### Local Development
-1. Start OAuth bridge locally: `cd ../ib-oauth-bridge-experimental && npm start`
-2. Start MCP server: `npm run dev`
-3. Test with MCP Inspector: `npx @modelcontextprotocol/inspector`
-4. Connect to: `http://localhost:3000/mcp`
+### Unit Testing
+
+**Example test for LoginTool:**
+```typescript
+describe('LoginTool', () => {
+  let tool: LoginTool;
+  let mockContext: ToolContext;
+  
+  beforeEach(() => {
+    tool = new LoginTool();
+    mockContext = createMockContext();
+  });
+  
+  test('generates valid authorization URL', async () => {
+    const result = await tool.execute(
+      { platformUrl: 'https://test.ib.com' },
+      mockContext
+    );
+    
+    const url = new URL(result.structuredContent.authorizationUrl);
+    expect(url.searchParams.get('response_type')).toBe('code');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  });
+  
+  test('creates session with correct parameters', async () => {
+    await tool.execute({}, mockContext);
+    
+    expect(mockContext.sessionManager.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: expect.any(String),
+        redirectUri: expect.any(String)
+      })
+    );
+  });
+});
+```
 
 ### Integration Testing
-1. Test OAuth flow end-to-end
-2. Test token refresh logic
-3. Test session expiry handling
-4. Test proxy endpoint calls
-5. Test error handling
 
-### Production Testing
-1. Deploy to EC2 ✓
-2. Configure nginx reverse proxy ✓
-3. Configure SSL/TLS with Let's Encrypt ✓
-4. Configure DNS (Route53) ✓
-5. Test HTTPS connection ✓
-6. Test with MCP Inspector over HTTPS (in progress)
-7. Test with Claude desktop app (pending)
-8. Monitor logs and performance
+```typescript
+describe('OAuth Flow Integration', () => {
+  test('complete authentication flow', async () => {
+    const app = createTestApp();
+    
+    // Step 1: Initiate login
+    const loginResponse = await request(app)
+      .post('/mcp')
+      .send(createToolRequest('auth_login'));
+    
+    const { sessionId, authorizationUrl } = extractResponse(loginResponse);
+    
+    // Step 2: Simulate OAuth callback
+    const callbackResponse = await request(app)
+      .get('/callback')
+      .query({ code: 'test-code', state: 'test-state' });
+    
+    expect(callbackResponse.status).toBe(200);
+    expect(callbackResponse.text).toContain('Authentication Successful');
+    
+    // Step 3: Check status
+    const statusResponse = await request(app)
+      .post('/mcp')
+      .send(createToolRequest('auth_status', { sessionId }));
+    
+    const status = extractResponse(statusResponse);
+    expect(status.authenticated).toBe(true);
+    expect(status.tokens).toBeDefined();
+  });
+});
+```
 
-## Next Immediate Steps
+## Success Metrics
 
-1. **MCP Inspector Testing** (Priority 1 - In Progress)
-   - Test HTTPS endpoint with MCP Inspector
-   - Verify all three auth tools working over HTTPS
-   - Test OAuth flow end-to-end
+### Technical Metrics
+- **File Size**: No file exceeds 200 lines (from 916)
+- **Test Coverage**: Achieve 85% code coverage
+- **Build Time**: < 10 seconds
+- **Startup Time**: < 2 seconds
+- **Memory Usage**: < 100MB baseline
 
-2. **Claude Desktop Testing** (Priority 2)
-   - Add MCP server to Claude desktop configuration
-   - Use HTTPS endpoint: `https://mcp.connectingib.com/mcp`
-   - Test OAuth flow end-to-end
-   - Verify all three auth tools working in Claude
+### Quality Metrics
+- **Tool Addition Time**: < 15 minutes for new tool
+- **Code Review Time**: Reduced by 60%
+- **Bug Discovery Rate**: Reduced by 50%
+- **Development Velocity**: Increased by 40%
 
-3. **Future Enhancements** (Priority 3)
-   - Implement additional IB API tools using `/proxy/*` endpoints
-   - Add automatic token refresh logic
-   - Implement comprehensive error handling
-   - Add CloudWatch monitoring and alerts
-   - Configure UFW firewall for additional security
+### Operational Metrics
+- **Deployment Success Rate**: 100%
+- **Rollback Time**: < 1 minute
+- **Zero Downtime**: Achieved
+- **Session Preservation**: 100% during deployment
 
-## Success Criteria
+## Risk Analysis
 
-- [x] MCP SDK updated to latest version (v1.20.1)
-- [x] HTTP transport implemented and building successfully
-- [x] OAuth 2.0 PKCE flow implemented
-- [x] Documentation fully updated
-- [x] Deployed to production EC2
-- [x] HTTPS/SSL/TLS configured with Let's Encrypt
-- [x] DNS configured (mcp.connectingib.com)
-- [x] nginx reverse proxy configured
-- [x] MCP protocol verified on HTTPS production endpoint
-- [x] All three auth tools available and responding
-- [x] All documentation updated with HTTPS URLs
-- [ ] OAuth flow tested end-to-end on production (HTTPS)
-- [ ] Tested with MCP Inspector over HTTPS
-- [ ] Tested in Claude desktop with production HTTPS URL
+### High-Risk Areas
 
-## Related Documentation
-- **Development Workflow**: `docs/development-workflow.md`
-- **Tech Stack**: `docs/techStack.md`
-- **Codebase Summary**: `docs/codebaseSummary.md`
-- **Project Roadmap**: `docs/projectRoadmap.md`
-- **OAuth Bridge**: `../ib-oauth-bridge-experimental/README.md`
-- **MCP SDK**: `node_modules/@modelcontextprotocol/sdk/README.md`
+1. **Session State Migration**
+   - Risk: Active sessions lost during refactoring
+   - Mitigation: Dual session manager support during transition
+   - Fallback: Export/import session state
+
+2. **OAuth Flow Disruption**
+   - Risk: In-flight authentications fail
+   - Mitigation: Keep exact same callback behavior
+   - Fallback: Parallel callback handlers
+
+3. **Tool Registration Changes**
+   - Risk: Tools not available when needed
+   - Mitigation: Comprehensive integration tests
+   - Fallback: Hot-reload tool registration
+
+### Medium-Risk Areas
+
+1. **Type System Changes**
+   - Risk: Runtime type errors
+   - Mitigation: Strict TypeScript, runtime validation
+   - Fallback: Zod schemas at boundaries
+
+2. **Performance Regression**
+   - Risk: Increased latency from abstraction
+   - Mitigation: Performance benchmarking
+   - Fallback: Optimization pass post-refactor
+
+## Timeline
+
+### Week 1: Foundation
+- Days 1-2: Type system and core abstractions
+- Days 3-4: Session and Token managers
+- Day 5: Tool registry and base class
+
+### Week 2: Tool Migration
+- Days 1-2: Auth tools (login, status)
+- Days 3-4: API call tool with token refresh
+- Day 5: Integration testing
+
+### Week 3: Server Refactoring
+- Days 1-2: Express app and OAuth handler
+- Days 3-4: MCP server wrapper
+- Day 5: New bootstrap and configuration
+
+### Week 4: Testing & Deployment
+- Days 1-2: Unit and integration tests
+- Day 3: Performance testing
+- Days 4-5: Staging deployment and validation
+
+### Week 5: Production Rollout
+- Day 1: Production deployment with feature flag
+- Days 2-3: Monitoring and validation
+- Day 4: Full cutover
+- Day 5: Documentation and cleanup
+
+## Next Steps
+
+1. **Review and Approve Plan**
+   - Stakeholder alignment on approach
+   - Risk assessment review
+   - Timeline confirmation
+
+2. **Set Up Development Environment**
+   ```bash
+   git checkout -b feature/architecture-refactor
+   npm install --save-dev vitest @vitest/ui
+   npm install esbuild
+   ```
+
+3. **Create Architecture Decision Record (ADR)**
+   - Document key decisions
+   - Capture alternatives considered
+   - Record rationale for choices
+
+4. **Begin Phase 1 Implementation**
+   - Start with type system
+   - Create core abstractions
+   - Set up testing framework
+
+## Conclusion
+
+This refactoring plan transforms the monolithic MCP server into a modular, scalable architecture while maintaining production stability. The incremental approach with feature flags ensures zero downtime and safe rollback capabilities. The new architecture will dramatically improve development velocity, code quality, and system maintainability.
+
+The investment in this refactoring will pay dividends through:
+- Rapid tool development (15 minutes vs hours)
+- Improved testability (85% coverage vs untestable)
+- Better performance (startup < 2s, memory < 100MB)
+- Enhanced developer experience (clear separation of concerns)
+- Production stability (zero-downtime deployments)
