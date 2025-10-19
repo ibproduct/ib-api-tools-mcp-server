@@ -8,8 +8,11 @@ Complete testing of the HTTP-based MCP server with OAuth 2.0 authentication and 
 - **HTTP Transport**: Implemented with Streamable HTTP ✓
 - **OAuth Integration**: Complete with PKCE flow ✓
 - **Build Status**: Successfully compiled ✓
-- **Documentation**: Fully updated ✓
-- **Production Deployment**: Live on EC2 (http://52.9.99.47:3000/mcp) ✓
+- **Documentation**: Fully updated with HTTPS deployment ✓
+- **Production Deployment**: Live on EC2 with HTTPS (https://mcp.connectingib.com/mcp) ✓
+- **SSL/TLS**: Configured with Let's Encrypt, auto-renewal enabled ✓
+- **DNS**: mcp.connectingib.com → 52.9.99.47 (Route53) ✓
+- **nginx**: Reverse proxy with SSL termination configured ✓
 - **Status**: Ready for testing in Claude Desktop
 
 ## Completed Work
@@ -57,11 +60,22 @@ Complete testing of the HTTP-based MCP server with OAuth 2.0 authentication and 
 - [x] Verified MCP protocol endpoint responding correctly
 - [x] Tested all three OAuth tools via curl
 
+### Phase 6: HTTPS and SSL/TLS Configuration ✓
+- [x] Configured DNS A record (mcp.connectingib.com → 52.9.99.47)
+- [x] Installed and configured nginx as reverse proxy
+- [x] Obtained Let's Encrypt SSL certificate via certbot
+- [x] Configured automatic certificate renewal
+- [x] Updated production .env with HTTPS URLs
+- [x] Verified HTTPS endpoint responding correctly
+- [x] Updated all documentation to reflect HTTPS deployment
+- [x] Clarified production deployment scope (runtime files only)
+
 ## Production Deployment Details
 
 ### EC2 Instance
 - **Instance ID**: i-0d648adfb366a8889
 - **Public IP**: 52.9.99.47 (Elastic IP: eipalloc-0bba57986860e351c)
+- **Domain**: mcp.connectingib.com (Route53 A record)
 - **Region**: us-west-1
 - **AMI**: ami-04f34746e5e1ec0fe (Ubuntu 22.04 LTS)
 - **Instance Type**: t2.micro (or similar)
@@ -70,48 +84,52 @@ Complete testing of the HTTP-based MCP server with OAuth 2.0 authentication and 
 ### Deployment Configuration
 - **Node.js**: v24.10.0
 - **Process Manager**: PM2 (ib-mcp-server)
+- **Reverse Proxy**: nginx 1.18.0 with SSL/TLS
+- **SSL Certificate**: Let's Encrypt (expires 2026-01-17, auto-renewal enabled)
 - **Installation Path**: `/opt/ib-api-tools-mcp-server`
-- **MCP Endpoint**: `http://52.9.99.47:3000/mcp`
-- **Environment**: Production (.env configured)
+- **MCP Endpoint**: `https://mcp.connectingib.com/mcp`
+- **Environment**: Production (.env configured with HTTPS URLs)
 
 ### Verified Functionality
 ```bash
+# HTTPS endpoint health check
+curl -I https://mcp.connectingib.com/mcp
+# Response: 200 OK with SSL certificate ✓
+
 # MCP protocol initialize test
-curl -X POST http://52.9.99.47:3000/mcp \
+curl -X POST https://mcp.connectingib.com/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}'
-
 # Response: Server info with protocol version and capabilities ✓
 
 # Tools list test
-curl -X POST http://52.9.99.47:3000/mcp \
+curl -X POST https://mcp.connectingib.com/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-
 # Response: Three tools (auth.login, auth.exchange, auth.status) ✓
 ```
 
 ## Remaining Tasks
 
 ### Testing Phase
-- [ ] Test with MCP Inspector on production endpoint
+- [ ] Test with MCP Inspector on HTTPS production endpoint
 - [ ] Complete OAuth flow end-to-end on production:
   - [ ] Call `auth.login` tool
   - [ ] Visit authorization URL in browser
   - [ ] Complete OAuth flow on IB platform
   - [ ] Call `auth.exchange` with code and verifier
   - [ ] Call `auth.status` with access token
-- [ ] Test in Claude desktop with production server
+- [ ] Test in Claude desktop with production server (HTTPS)
 - [ ] Verify error handling and edge cases
 
 ### Optional Future Enhancements
-- [ ] Configure nginx reverse proxy for SSL termination
-- [ ] Obtain SSL certificate with Let's Encrypt
-- [ ] Configure DNS for production domain (e.g., mcp-api.intelligencebank.com)
 - [ ] Configure firewall (UFW) for additional security
-- [ ] Set up CloudWatch monitoring
+- [ ] Set up CloudWatch monitoring and alerts
+- [ ] Implement automatic token refresh logic
+- [ ] Add rate limiting middleware
+- [ ] Set up log aggregation service
 
 ## Implementation Details
 
@@ -139,15 +157,17 @@ curl -X POST http://52.9.99.47:3000/mcp \
   - code_challenge: SHA-256 hash of code_verifier
   - state: 16-byte random base64url for CSRF protection
 
-### Deployment: EC2 Server
+### Deployment: EC2 Server with HTTPS
 - **Infrastructure**: EC2 instance i-0d648adfb366a8889 (us-west-1)
 - **Public IP**: 52.9.99.47 (Elastic IP)
-- **Endpoint**: http://52.9.99.47:3000/mcp
+- **Domain**: mcp.connectingib.com (Route53)
+- **Endpoint**: https://mcp.connectingib.com/mcp
+- **Reverse Proxy**: nginx with SSL/TLS termination
+- **SSL Certificate**: Let's Encrypt (auto-renewal enabled)
 - **Process Manager**: PM2 (ib-mcp-server process)
-- **Environment**: Production .env with OAuth bridge configuration
+- **Environment**: Production .env with HTTPS OAuth configuration
 - **Node.js**: v24.10.0
 - **Status**: Running and verified ✓
-- **Future**: nginx reverse proxy, SSL/TLS via Let's Encrypt, DNS configuration
 
 ## Architecture Overview
 
@@ -249,7 +269,7 @@ Validates token and retrieves user information.
 OAUTH_BRIDGE_URL=https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev
 OAUTH_CLIENT_ID=ib-api-tools-mcp-server-{generated-uuid}
 OAUTH_REDIRECT_URI=http://localhost:3000/callback  # Local dev
-# OAUTH_REDIRECT_URI=https://mcp.example.com/callback  # Production
+# OAUTH_REDIRECT_URI=https://mcp.connectingib.com/callback  # Production (HTTPS)
 
 # MCP Server Configuration
 PORT=3000
@@ -277,31 +297,34 @@ ALLOWED_HOSTS=127.0.0.1,localhost
 5. Test error handling
 
 ### Production Testing
-1. Deploy to EC2
-2. Configure reverse proxy
-3. Test SSL/TLS connection
-4. Test with Claude desktop app
-5. Monitor logs and performance
+1. Deploy to EC2 ✓
+2. Configure nginx reverse proxy ✓
+3. Configure SSL/TLS with Let's Encrypt ✓
+4. Configure DNS (Route53) ✓
+5. Test HTTPS connection ✓
+6. Test with MCP Inspector over HTTPS (in progress)
+7. Test with Claude desktop app (pending)
+8. Monitor logs and performance
 
 ## Next Immediate Steps
 
-1. **Claude Desktop Testing** (Priority 1)
-   - Add MCP server to Claude desktop configuration
-   - Use configuration: `mcp_settings_production.json`
+1. **MCP Inspector Testing** (Priority 1 - In Progress)
+   - Test HTTPS endpoint with MCP Inspector
+   - Verify all three auth tools working over HTTPS
    - Test OAuth flow end-to-end
-   - Verify all three auth tools working
 
-2. **Optional SSL/DNS Configuration** (Priority 2)
-   - Set up nginx reverse proxy
-   - Obtain Let's Encrypt SSL certificate
-   - Configure DNS for friendly domain name
-   - Update OAuth redirect URI configuration
+2. **Claude Desktop Testing** (Priority 2)
+   - Add MCP server to Claude desktop configuration
+   - Use HTTPS endpoint: `https://mcp.connectingib.com/mcp`
+   - Test OAuth flow end-to-end
+   - Verify all three auth tools working in Claude
 
 3. **Future Enhancements** (Priority 3)
    - Implement additional IB API tools using `/proxy/*` endpoints
    - Add automatic token refresh logic
    - Implement comprehensive error handling
    - Add CloudWatch monitoring and alerts
+   - Configure UFW firewall for additional security
 
 ## Success Criteria
 
@@ -310,10 +333,15 @@ ALLOWED_HOSTS=127.0.0.1,localhost
 - [x] OAuth 2.0 PKCE flow implemented
 - [x] Documentation fully updated
 - [x] Deployed to production EC2
-- [x] MCP protocol verified on production endpoint
+- [x] HTTPS/SSL/TLS configured with Let's Encrypt
+- [x] DNS configured (mcp.connectingib.com)
+- [x] nginx reverse proxy configured
+- [x] MCP protocol verified on HTTPS production endpoint
 - [x] All three auth tools available and responding
-- [ ] OAuth flow tested end-to-end on production
-- [ ] Tested in Claude desktop with production URL
+- [x] All documentation updated with HTTPS URLs
+- [ ] OAuth flow tested end-to-end on production (HTTPS)
+- [ ] Tested with MCP Inspector over HTTPS
+- [ ] Tested in Claude desktop with production HTTPS URL
 
 ## Related Documentation
 - **Development Workflow**: `docs/development-workflow.md`
