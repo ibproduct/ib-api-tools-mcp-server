@@ -266,15 +266,26 @@ curl -X POST https://mcp.connectingib.com/mcp \
 
 ### Updating Production Instance
 
-1. **Pull Latest Changes**
+**Note**: The EC2 production server only needs the compiled code (`dist/`), runtime dependencies (`node_modules/`), and configuration files (`.env`). Documentation files in `docs/` are for developers working on the repository and are not required on the production server.
+
+1. **Pull Latest Code Changes Only**
    ```bash
    ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47
    cd /opt/ib-api-tools-mcp-server
-   sudo git config --global --add safe.directory /opt/ib-api-tools-mcp-server
+   
+   # Pull only source code changes (src/, package.json, tsconfig.json)
    sudo git pull origin main
+   
+   # Install any new dependencies
    sudo npm install
+   
+   # Rebuild application
    sudo npm run build
+   
+   # Restart the server
    pm2 restart ib-mcp-server
+   
+   # Verify the update
    pm2 logs ib-mcp-server --lines 20
    ```
 
@@ -286,6 +297,20 @@ curl -X POST https://mcp.connectingib.com/mcp \
      -H "Accept: application/json, text/event-stream" \
      -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}'
    ```
+
+**What Gets Deployed to EC2:**
+- `/opt/ib-api-tools-mcp-server/src/` - Source code
+- `/opt/ib-api-tools-mcp-server/dist/` - Compiled JavaScript (built from src/)
+- `/opt/ib-api-tools-mcp-server/node_modules/` - Runtime dependencies
+- `/opt/ib-api-tools-mcp-server/package.json` - Dependency manifest
+- `/opt/ib-api-tools-mcp-server/tsconfig.json` - TypeScript configuration
+- `/opt/ib-api-tools-mcp-server/.env` - Production environment variables
+
+**What Stays in Repository Only:**
+- `/docs/*` - Developer documentation (not needed for runtime)
+- `README.md` - Project overview (reference only)
+- `.env.example` - Environment template (not used in production)
+- `mcp_settings*.json` - Client configuration examples (not server-side)
 
 ## Production Deployment (EC2)
 
@@ -321,6 +346,8 @@ curl -X POST https://mcp.connectingib.com/mcp \
 
 ### Application Deployment
 
+**Important**: The production server only requires compiled code and runtime dependencies. Documentation files (`docs/`, `README.md`) are for developers and are not needed on the server.
+
 1. **Clone Repository**
    ```bash
    cd /opt
@@ -328,14 +355,22 @@ curl -X POST https://mcp.connectingib.com/mcp \
    cd ib-api-tools-mcp-server
    ```
 
-2. **Install Dependencies**
+2. **Install Production Dependencies**
    ```bash
-   sudo npm install
+   # Install only production dependencies (no devDependencies)
+   sudo npm install --production
    ```
 
 3. **Build Application**
    ```bash
+   # Temporarily install build dependencies
+   sudo npm install --only=dev
+   
+   # Build the application
    sudo npm run build
+   
+   # Remove dev dependencies to save space
+   sudo npm prune --production
    ```
 
 4. **Create Production Environment File**
@@ -494,15 +529,25 @@ sudo ufw enable
    ```bash
    sudo git pull origin main
    ```
+   
+   **Note**: This pulls all files including documentation, but only the source code and build output are used by the running server.
 
-4. **Install Dependencies** (if package.json changed)
+4. **Install/Update Dependencies** (if package.json changed)
    ```bash
-   sudo npm install
+   # Install production dependencies
+   sudo npm install --production
    ```
 
 5. **Rebuild Application**
    ```bash
+   # Install dev dependencies for build
+   sudo npm install --only=dev
+   
+   # Build
    sudo npm run build
+   
+   # Clean up dev dependencies
+   sudo npm prune --production
    ```
 
 6. **Restart PM2 Process**
