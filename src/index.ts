@@ -25,7 +25,7 @@ const server = new McpServer({
 
 // Register authentication tools
 server.registerTool(
-    'auth.login',
+    'auth_login',
     {
         title: 'OAuth Login',
         description: 'Start OAuth 2.0 login flow with IntelligenceBank',
@@ -82,7 +82,7 @@ server.registerTool(
 );
 
 server.registerTool(
-    'auth.exchange',
+    'auth_exchange',
     {
         title: 'Exchange Authorization Code',
         description: 'Exchange authorization code for access tokens',
@@ -157,7 +157,7 @@ server.registerTool(
 );
 
 server.registerTool(
-    'auth.status',
+    'auth_status',
     {
         title: 'Authentication Status',
         description: 'Check current authentication status and user information',
@@ -257,9 +257,9 @@ const port = parseInt(process.env.PORT || '3000');
 app.listen(port, () => {
     console.log(`IntelligenceBank API Tools MCP Server running on http://localhost:${port}/mcp`);
     console.log('Available tools:');
-    console.log('  - auth.login: Start OAuth 2.0 login flow');
-    console.log('  - auth.exchange: Exchange authorization code for tokens');
-    console.log('  - auth.status: Check authentication status');
+    console.log('  - auth_login: Start OAuth 2.0 login flow');
+    console.log('  - auth_exchange: Exchange authorization code for tokens');
+    console.log('  - auth_status: Check authentication status');
 }).on('error', (error) => {
     console.error('Server error:', error);
     process.exit(1);
