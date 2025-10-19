@@ -62,71 +62,124 @@ For production deployment, use: `https://mcp.connectingib.com/mcp`
 
 ## Available Tools
 
-### auth.login
+### auth_login
 
-Initiates the OAuth 2.0 authentication flow.
+Initiates the OAuth 2.0 authentication flow with automatic token exchange.
 
 **Input:**
 - `platformUrl` (optional): Your IntelligenceBank instance URL (e.g., `https://demo.intelligencebank.com`)
 
 **Output:**
 - `authorizationUrl`: URL to visit for authentication
-- `state`: CSRF protection parameter
-- `codeVerifier`: PKCE parameter (needed for token exchange)
+- `sessionId`: Session identifier for tracking authentication progress
+- `instructions`: User-friendly instructions for next steps
 
 **Example:**
 ```typescript
-use_mcp_tool ib-api-tools auth.login { "platformUrl": "https://demo.intelligencebank.com" }
+use_mcp_tool ib-api-tools auth_login { "platformUrl": "https://demo.intelligencebank.com" }
 ```
 
-### auth.exchange
+### auth_status
 
-Exchanges the authorization code for access tokens.
-
-**Input:**
-- `code`: Authorization code from the callback URL
-- `codeVerifier`: PKCE parameter from login step
-- `state` (optional): State parameter for validation
-
-**Output:**
-- `accessToken`: JWT access token (1-hour expiry)
-- `tokenType`: Token type (Bearer)
-- `expiresIn`: Seconds until token expiry
-- `refreshToken`: Token for session renewal
-
-**Example:**
-```typescript
-use_mcp_tool ib-api-tools auth.exchange {
-  "code": "authorization-code-from-callback",
-  "codeVerifier": "code-verifier-from-login"
-}
-```
-
-### auth.status
-
-Validates the access token and retrieves user information.
+Checks authentication status and retrieves tokens or user information.
 
 **Input:**
-- `accessToken`: The JWT access token
+- `sessionId` (optional): Session ID from login step (for polling authentication)
+- `accessToken` (optional): Access token to validate and get user info
 
-**Output:**
+**Note:** Provide either `sessionId` OR `accessToken`, not both.
+
+**Output (with sessionId):**
+- `status`: Authentication status (pending/completed/error)
+- `authenticated`: Boolean indicating completion
+- `tokens`: Access and refresh tokens (if completed)
+- `userInfo`: User details (if completed)
+
+**Output (with accessToken):**
 - `authenticated`: Boolean indicating if token is valid
-- `userInfo`: User details (if authenticated)
+- `userInfo`: User details (if valid)
+- `expiresIn`: Seconds until token expiry
 
 **Example:**
 ```typescript
-use_mcp_tool ib-api-tools auth.status {
-  "accessToken": "your-access-token"
+// Check authentication progress
+use_mcp_tool ib-api-tools auth_status { "sessionId": "session-id-from-login" }
+
+// Validate existing token
+use_mcp_tool ib-api-tools auth_status { "accessToken": "your-access-token" }
+```
+
+### api_call
+
+Makes authenticated API calls to IntelligenceBank with automatic token refresh.
+
+**Input:**
+- `sessionId`: Session ID from successful authentication
+- `method`: HTTP method (GET, POST, PUT, DELETE, PATCH)
+- `path`: API endpoint path (e.g., `/api/v1/resources`)
+- `body` (optional): Request body for POST/PUT/PATCH requests
+- `queryParams` (optional): URL query parameters
+
+**Output:**
+- `success`: Boolean indicating if request succeeded
+- `data`: Response data from the API
+- `statusCode`: HTTP status code
+
+**Features:**
+- Automatic token refresh on 401 errors
+- Session expiry detection with re-authentication prompt
+- Retry logic for transient failures
+
+**Example:**
+```typescript
+use_mcp_tool ib-api-tools api_call {
+  "sessionId": "your-session-id",
+  "method": "GET",
+  "path": "/api/v1/resources",
+  "queryParams": { "limit": "10" }
 }
 ```
+
+### auth_exchange (DEPRECATED)
+
+This tool is deprecated. The `/callback` endpoint now handles token exchange automatically. Use `auth_login` and `auth_status` instead.
 
 ## OAuth Flow
 
-1. **Initiate Login**: Call `auth.login` to get authorization URL
-2. **User Authentication**: Visit the URL, select platform, and log in
-3. **Callback**: User is redirected with authorization code
-4. **Exchange Code**: Call `auth.exchange` with code and verifier
-5. **Use Token**: Call `auth.status` or API tools with access token
+### Automatic Flow (Recommended)
+
+The OAuth flow is now fully automatic with session-based tracking:
+
+1. **Initiate Login**: Call `auth_login` to receive:
+   - Authorization URL to visit in browser
+   - Session ID for tracking authentication progress
+
+2. **User Authentication**:
+   - Visit the authorization URL in your browser
+   - Select your IntelligenceBank platform
+   - Complete the login process
+
+3. **Automatic Token Exchange**:
+   - Upon successful authentication, you're redirected to `/callback`
+   - Server automatically exchanges authorization code for tokens
+   - You see a success confirmation page
+   - Tokens are stored in the session
+
+4. **Retrieve Tokens**:
+   - Poll `auth_status` with your session ID
+   - Receive access token, refresh token, and user information
+
+5. **Make API Calls**:
+   - Use `api_call` tool with session ID for authenticated requests
+   - Tokens automatically refresh when needed
+   - Re-authentication only required when refresh token expires
+
+### Session Management
+
+- Sessions expire after 5 minutes if authentication is not completed
+- Automatic cleanup of expired sessions runs every minute
+- Tokens refresh automatically on 401 errors during API calls
+- Re-authentication required only when session or refresh token expires
 
 ## Environment Variables
 

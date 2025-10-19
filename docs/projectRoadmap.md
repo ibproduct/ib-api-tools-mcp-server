@@ -27,9 +27,10 @@ Create a production-ready MCP server that enables AI assistants (like Claude) to
 - [ ] CI/CD pipeline (future)
 
 ### API Integration 🚧
+- [ ] Risk Review tools
 - [ ] Resource management tools
-- [ ] Search functionality
-- [ ] Workflow operations
+- [ ] Database briefs tools
+- [ ] Workflow tools
 - [ ] User management
 - [ ] Asset operations
 
@@ -47,9 +48,9 @@ Create a production-ready MCP server that enables AI assistants (like Claude) to
 - [x] OAuth bridge integration
 - [x] PKCE implementation (code_verifier, code_challenge)
 - [x] Three authentication tools:
-  - [x] `auth.login` - Initiate OAuth flow
-  - [x] `auth.exchange` - Exchange code for tokens
-  - [x] `auth.status` - Validate token and get user info
+  - [x] `auth_login` - Initiate OAuth flow
+  - [x] `auth_exchange` - Exchange code for tokens
+  - [x] `auth_status` - Validate token and get user info
 - [x] JWT token handling
 - [x] Error handling for OAuth flow
 

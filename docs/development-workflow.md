@@ -96,11 +96,11 @@ npm run format
    
    In MCP Inspector:
    
-   a. Call `auth.login` tool (optionally with `platformUrl`)
+   a. Call `auth_login` tool (optionally with `platformUrl`)
    b. Open the returned authorization URL in a browser
    c. Complete the OAuth login flow
-   d. Call `auth.exchange` with the code and codeVerifier
-   e. Call `auth.status` with the access token
+   d. Call `auth_exchange` with the code and codeVerifier
+   e. Call `auth_status` with the access token
 
 ### Claude Desktop Testing
 
@@ -124,6 +124,22 @@ Restart Claude desktop and verify the connection.
 
 ## Development Workflow
 
+### Current Deployment Strategy (Development Phase)
+
+**Important**: During active development, we deploy directly from local to production for rapid iteration and testing. Code is committed to GitHub only after it has been tested and verified on the production server.
+
+**Workflow:**
+1. Make changes locally
+2. Build locally (`npm run build`)
+3. Deploy built code directly to EC2 production server
+4. Test on production server
+5. Once verified, commit and push to GitHub
+
+**Future Strategy**: When ready for production release with actual users, we will implement a staging/production environment:
+- **Staging Server**: Tied to `dev` branch for testing
+- **Production Server**: Tied to `main` branch, deployed only after staging verification
+- **Deployment**: Production will pull from GitHub `main` branch automatically
+
 ### Making Changes
 
 1. **Create Feature Branch** (optional)
@@ -136,30 +152,54 @@ Restart Claude desktop and verify the connection.
    - Update tests if needed
    - Follow TypeScript best practices
 
-3. **Test Changes Locally**
+3. **Build Locally**
    ```bash
    npm run build
-   npm run dev
+   ```
+
+4. **Deploy to Production for Testing**
+   ```bash
+   # Copy built file to EC2 via /tmp (avoids permission issues)
+   scp -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem \
+     dist/index.js ubuntu@52.9.99.47:/tmp/index.js
+   
+   # SSH in, move file, and restart server
+   ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47 \
+     "sudo cp /tmp/index.js /opt/ib-api-tools-mcp-server/dist/index.js && \
+      pm2 restart ib-mcp-server && \
+      pm2 logs ib-mcp-server --lines 15"
    ```
    
-   Test with MCP Inspector or Claude desktop.
+   **Alternative (single command):**
+   ```bash
+   cd /path/to/ib-api-tools-mcp-server && \
+   scp -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem \
+     dist/index.js ubuntu@52.9.99.47:/tmp/index.js && \
+   ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47 \
+     "sudo cp /tmp/index.js /opt/ib-api-tools-mcp-server/dist/index.js && \
+      pm2 restart ib-mcp-server && \
+      pm2 logs ib-mcp-server --lines 15"
+   ```
 
-4. **Update Documentation**
+5. **Test on Production**
+   - Test with MCP Inspector: `npx @modelcontextprotocol/inspector https://mcp.connectingib.com/mcp`
+   - Test with Claude Desktop (update config to use production URL)
+   - Verify all functionality works as expected
+
+6. **Update Documentation** (if needed)
    - Update `docs/codebaseSummary.md` for structural changes
    - Update `docs/techStack.md` for technology changes
    - Update `docs/currentTask.md` for current objectives
    - Update `README.md` for user-facing changes
 
-5. **Commit Changes**
+7. **Commit and Push to GitHub** (only after production testing)
    ```bash
    git add .
    git commit -m "Description of changes"
-   ```
-
-6. **Push to Repository**
-   ```bash
    git push origin feature/your-feature-name
    ```
+   
+   **Important**: Only commit tested and working code. This ensures the GitHub repository always contains verified, production-ready code.
 
 ### Code Quality Standards
 
@@ -261,19 +301,21 @@ curl -X POST https://mcp.connectingib.com/mcp \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 
-# Response: All three tools (auth.login, auth.exchange, auth.status) available ✓
+# Response: All three tools (auth_login, auth_exchange, auth_status) available ✓
 ```
 
 ### Updating Production Instance
 
-**Note**: The EC2 production server only needs the compiled code (`dist/`), runtime dependencies (`node_modules/`), and configuration files (`.env`). Documentation files in `docs/` are for developers working on the repository and are not required on the production server.
+**Current Development Workflow**: During active development, we deploy directly from local to production for rapid testing. See "Making Changes" section above for the recommended workflow.
 
-1. **Pull Latest Code Changes Only**
+**Future Production Workflow**: When we implement staging/production environments, production will pull from GitHub `main` branch:
+
+1. **Pull Latest Code from GitHub**
    ```bash
    ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47
    cd /opt/ib-api-tools-mcp-server
    
-   # Pull only source code changes (src/, package.json, tsconfig.json)
+   # Pull from main branch (production-ready code)
    sudo git pull origin main
    
    # Install any new dependencies
@@ -297,6 +339,8 @@ curl -X POST https://mcp.connectingib.com/mcp \
      -H "Accept: application/json, text/event-stream" \
      -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0.0"}}}'
    ```
+
+**Note**: The EC2 production server only needs the compiled code (`dist/`), runtime dependencies (`node_modules/`), and configuration files (`.env`). Documentation files in `docs/` are for developers working on the repository and are not required on the production server.
 
 **What Gets Deployed to EC2:**
 - `/opt/ib-api-tools-mcp-server/src/` - Source code
@@ -651,11 +695,11 @@ Restart Claude desktop and test the connection.
 
 ### OAuth Flow Verification
 
-1. Use `auth.login` tool in Claude
+1. Use `auth_login` tool in Claude
 2. Open authorization URL
 3. Complete OAuth flow
-4. Use `auth.exchange` to get tokens
-5. Use `auth.status` to verify authentication
+4. Use `auth_exchange` to get tokens
+5. Use `auth_status` to verify authentication
 
 ## Troubleshooting
 

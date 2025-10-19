@@ -195,7 +195,7 @@ docs/
 - **MCP Protocol**: Initialize and tools/list verified ✓
 - **HTTPS Endpoint**: curl POST to https://mcp.connectingib.com/mcp ✓
 - **SSL Certificate**: Let's Encrypt verified ✓
-- **Tools Available**: auth.login, auth.exchange, auth.status ✓
+- **Tools Available**: auth_login, auth_exchange, auth_status ✓
 - **Claude Desktop**: Configuration in mcp_settings_production.json
 - **Next**: End-to-end OAuth flow testing, Claude desktop integration
 

@@ -71,7 +71,7 @@ Main application entry point that implements:
 
 ### OAuth Tools
 
-#### 1. auth.login
+#### 1. auth_login
 Initiates OAuth 2.0 flow with PKCE parameters.
 
 **Input:**
@@ -89,7 +89,7 @@ Initiates OAuth 2.0 flow with PKCE parameters.
 4. Build authorization URL with all parameters
 5. Return URL and parameters to client
 
-#### 2. auth.exchange
+#### 2. auth_exchange
 Exchanges authorization code for access tokens.
 
 **Input:**
@@ -109,7 +109,7 @@ Exchanges authorization code for access tokens.
 3. Include code, codeVerifier, and PKCE verification
 4. Return tokens to client
 
-#### 3. auth.status
+#### 3. auth_status
 Validates token and retrieves user information.
 
 **Input:**
@@ -146,16 +146,16 @@ Validates token and retrieves user information.
 ### OAuth Authentication Flow
 
 ```
-1. Client → MCP Server: auth.login request
+1. Client → MCP Server: auth_login request
 2. MCP Server → Client: authorizationUrl, state, codeVerifier
 3. User → OAuth Bridge: Visit authorization URL
 4. User → OAuth Bridge: Select platform, log in
 5. OAuth Bridge → User: Redirect to callback with code
-6. Client → MCP Server: auth.exchange with code, codeVerifier
+6. Client → MCP Server: auth_exchange with code, codeVerifier
 7. MCP Server → OAuth Bridge: POST /token with PKCE verification
 8. OAuth Bridge → MCP Server: Return access/refresh tokens
 9. MCP Server → Client: Return tokens
-10. Client → MCP Server: auth.status with accessToken
+10. Client → MCP Server: auth_status with accessToken
 11. MCP Server → OAuth Bridge: GET /userinfo
 12. OAuth Bridge → MCP Server: Return user information
 13. MCP Server → Client: Return authenticated status
@@ -292,7 +292,7 @@ Validates token and retrieves user information.
 ### Production Testing
 - **Health Check**: `curl -I https://mcp.connectingib.com/mcp`
 - **MCP Protocol**: POST requests with proper headers ✓
-- **Tools Available**: auth.login, auth.exchange, auth.status ✓
+- **Tools Available**: auth_login, auth_exchange, auth_status ✓
 - **SSL/TLS**: Let's Encrypt certificate verified ✓
 - **Claude Desktop**: Use `mcp_settings_production.json` configuration
 

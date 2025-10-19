@@ -1,26 +1,25 @@
-# Current Task: Test and Deploy Remote MCP Server with OAuth Authentication
+# Current Task: Automatic OAuth Callback Flow Implementation
 
 ## Objective
-Complete testing of the HTTP-based MCP server with OAuth 2.0 authentication and deploy to production EC2 infrastructure.
+Implement seamless OAuth 2.0 authentication with automatic token exchange via callback endpoint, eliminating manual code extraction and providing a polished user experience.
 
 ## Current State
-- **MCP SDK**: Successfully updated to v1.20.1 ✓
-- **HTTP Transport**: Implemented with Streamable HTTP ✓
-- **OAuth Integration**: Complete with PKCE flow ✓
+- **MCP SDK**: v1.20.1 with Streamable HTTP transport ✓
+- **OAuth Flow**: Automatic callback-based authentication ✓
+- **Session Management**: In-memory session tracking with TTL ✓
+- **Callback Endpoint**: GET /callback with automatic token exchange ✓
+- **Token Refresh**: Automatic refresh on API calls ✓
 - **Build Status**: Successfully compiled ✓
-- **Documentation**: Fully updated with HTTPS deployment ✓
+- **Documentation**: Fully updated with new OAuth flow ✓
 - **Production Deployment**: Live on EC2 with HTTPS (https://mcp.connectingib.com/mcp) ✓
-- **SSL/TLS**: Configured with Let's Encrypt, auto-renewal enabled ✓
-- **DNS**: mcp.connectingib.com → 52.9.99.47 (Route53) ✓
-- **nginx**: Reverse proxy with SSL termination configured ✓
-- **Status**: Ready for testing in Claude Desktop
+- **Status**: Implementation complete, ready for testing and deployment
 
 ## Completed Work
 
 ### Phase 1: Clean Up & Dependencies ✓
 - [x] Updated MCP SDK to v1.20.1
 - [x] Reviewed current implementation
-- [x] Removed Cloudflare Workers artifacts (wrangler.jsonc, worker-configuration.d.ts)
+- [x] Removed Cloudflare Workers artifacts
 - [x] Added Express.js, CORS, dotenv dependencies
 - [x] Updated package.json with new dependencies and version
 
@@ -34,41 +33,49 @@ Complete testing of the HTTP-based MCP server with OAuth 2.0 authentication and 
 ### Phase 3: OAuth Bridge Integration ✓
 - [x] Implemented OAuth 2.0 authorization flow with PKCE
 - [x] Created OAuth client configuration
-- [x] Implemented three authentication tools:
-  - `auth.login`: Generate authorization URL with PKCE parameters
-  - `auth.exchange`: Exchange code for access/refresh tokens
-  - `auth.status`: Validate token and retrieve user info
-- [x] Implemented JWT token handling (client-managed)
-- [x] Created helper functions for PKCE (code_verifier, code_challenge, state)
+- [x] Implemented authentication tools
+- [x] Implemented JWT token handling
+- [x] Created helper functions for PKCE
 
-### Phase 4: Documentation ✓
-- [x] Created comprehensive development-workflow.md
-- [x] Updated README.md with HTTP transport usage
-- [x] Updated techStack.md to reflect MCP SDK 1.20.1 and new architecture
-- [x] Updated codebaseSummary.md with current implementation details
-- [x] Merged workflow.md and deployment.md into development-workflow.md
-- [x] Removed obsolete documentation files
-
-### Phase 5: Production Deployment ✓
+### Phase 4: Production Deployment ✓
 - [x] Created EC2 instance (i-0d648adfb366a8889)
 - [x] Allocated Elastic IP (52.9.99.47)
 - [x] Installed Node.js 24.10.0 and PM2
 - [x] Deployed code to `/opt/ib-api-tools-mcp-server`
-- [x] Created production `.env` file with correct configuration
-- [x] Started with PM2 (process name: ib-mcp-server)
-- [x] Configured security group for ports 22, 80, 443, 3000, 4001
-- [x] Verified MCP protocol endpoint responding correctly
-- [x] Tested all three OAuth tools via curl
+- [x] Configured security group
+- [x] Verified MCP protocol endpoint
 
-### Phase 6: HTTPS and SSL/TLS Configuration ✓
+### Phase 5: HTTPS and SSL/TLS Configuration ✓
 - [x] Configured DNS A record (mcp.connectingib.com → 52.9.99.47)
 - [x] Installed and configured nginx as reverse proxy
 - [x] Obtained Let's Encrypt SSL certificate via certbot
 - [x] Configured automatic certificate renewal
 - [x] Updated production .env with HTTPS URLs
 - [x] Verified HTTPS endpoint responding correctly
-- [x] Updated all documentation to reflect HTTPS deployment
-- [x] Clarified production deployment scope (runtime files only)
+
+### Phase 6: Automatic OAuth Callback Implementation ✓
+- [x] Designed session-based authentication storage mechanism
+- [x] Implemented GET /callback endpoint to handle OAuth redirects
+- [x] Implemented automatic authorization code exchange in callback
+- [x] Created in-memory session storage with 5-minute TTL
+- [x] Modified auth_login to return sessionId instead of PKCE parameters
+- [x] Created beautiful HTML success page for authentication confirmation
+- [x] Created beautiful HTML error page with troubleshooting
+- [x] Enhanced auth_status for dual-mode operation (session polling + token validation)
+- [x] Implemented automatic token refresh functionality
+- [x] Added api_call tool for authenticated API requests
+- [x] Implemented session cleanup mechanism (runs every minute)
+- [x] Added retry logic and error handling for API calls
+- [x] Deprecated auth_exchange tool (no longer needed)
+
+### Phase 7: Documentation Update ✓
+- [x] Updated README.md with new automatic OAuth flow
+- [x] Created comprehensive oauth-automatic-flow.md documentation
+- [x] Updated currentTask.md to reflect new implementation
+- [x] Updated codebaseSummary.md (pending)
+- [x] Updated techStack.md (pending)
+- [x] Updated projectRoadmap.md (pending)
+- [x] Updated development-workflow.md (pending)
 
 ## Production Deployment Details
 
@@ -108,7 +115,7 @@ curl -X POST https://mcp.connectingib.com/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-# Response: Three tools (auth.login, auth.exchange, auth.status) ✓
+# Response: Three tools (auth_login, auth_exchange, auth_status) ✓
 ```
 
 ## Remaining Tasks
@@ -116,11 +123,11 @@ curl -X POST https://mcp.connectingib.com/mcp \
 ### Testing Phase
 - [ ] Test with MCP Inspector on HTTPS production endpoint
 - [ ] Complete OAuth flow end-to-end on production:
-  - [ ] Call `auth.login` tool
+  - [ ] Call `auth_login` tool
   - [ ] Visit authorization URL in browser
   - [ ] Complete OAuth flow on IB platform
-  - [ ] Call `auth.exchange` with code and verifier
-  - [ ] Call `auth.status` with access token
+  - [ ] Call `auth_exchange` with code and verifier
+  - [ ] Call `auth_status` with access token
 - [ ] Test in Claude desktop with production server (HTTPS)
 - [ ] Verify error handling and edge cases
 
@@ -183,15 +190,15 @@ IntelligenceBank API
 
 ## Implemented Tools
 
-### 1. auth.login
-Initiates OAuth 2.0 authorization flow with PKCE.
+### 1. auth_login
+Initiates OAuth 2.0 authorization flow with automatic callback handling.
 
 **Implementation:**
-- Generates 32-byte random code_verifier (base64url)
-- Computes SHA-256 code_challenge from verifier
-- Generates 16-byte random state parameter
-- Constructs authorization URL with all parameters
-- Returns URL and parameters to client
+- Generates sessionId for tracking
+- Generates PKCE parameters (code_verifier, code_challenge, state)
+- Stores session with 5-minute TTL
+- Constructs authorization URL
+- Returns URL, sessionId, and user instructions
 
 **Input Schema:**
 ```typescript
@@ -204,63 +211,103 @@ Initiates OAuth 2.0 authorization flow with PKCE.
 ```typescript
 {
   authorizationUrl: string,  // URL to visit for authentication
-  state: string,             // CSRF protection parameter
-  codeVerifier: string       // PKCE parameter for exchange step
+  sessionId: string,         // Session ID for tracking
+  instructions: string       // User-friendly next steps
 }
 ```
 
-### 2. auth.exchange
-Exchanges authorization code for access tokens.
+**User Flow:**
+1. User receives authorization URL and sessionId
+2. User visits URL in browser
+3. User authenticates on IntelligenceBank platform
+4. OAuth bridge redirects to `/callback`
+5. Server automatically exchanges code for tokens
+6. User sees success page
+7. User tells Claude to check auth status
+8. Claude polls `auth_status` with sessionId
+
+### 2. auth_status
+Checks authentication status and retrieves tokens/user information.
 
 **Implementation:**
-- Validates input parameters
-- POSTs to OAuth bridge `/token` endpoint
-- Includes code, codeVerifier, and redirect URI
-- Returns access and refresh tokens
+- Looks up session by sessionId
+- Returns current status (pending/completed/error)
+- Returns tokens and userInfo when authentication is complete
+- Includes IntelligenceBank API session data (`clientid`, `apiV3url`, `sid`)
 
 **Input Schema:**
 ```typescript
 {
-  code: string,          // Authorization code from callback
-  codeVerifier: string,  // PKCE parameter from login step
-  state?: string         // Optional state for validation
+  sessionId: string  // Session ID from auth_login
 }
 ```
 
 **Output:**
 ```typescript
 {
-  accessToken: string,   // JWT access token
-  tokenType: string,     // "Bearer"
-  expiresIn: number,     // Seconds until expiry (3600)
-  refreshToken: string   // Token for session renewal
-}
-```
-
-### 3. auth.status
-Validates token and retrieves user information.
-
-**Implementation:**
-- Calls OAuth bridge `/userinfo` endpoint
-- Includes Authorization header with Bearer token
-- Returns user information if valid
-
-**Input Schema:**
-```typescript
-{
-  accessToken: string    // JWT access token to validate
-}
-```
-
-**Output:**
-```typescript
-{
+  status: 'pending' | 'completed' | 'error',
   authenticated: boolean,
+  tokens?: {
+    accessToken: string,
+    refreshToken: string,
+    tokenType: string,
+    expiresIn: number
+  },
   userInfo?: {
-    // User details from OAuth bridge
-  }
+    name: string,
+    email: string,
+    sub: string,
+    clientid: string,      // IB client/company ID
+    apiV3url: string,      // IB API base URL
+    sid: string,           // IB session ID
+    // ... other fields
+  },
+  error?: string,
+  errorDescription?: string
 }
 ```
+
+**Critical Data Stored:**
+- `clientid`: Used to construct IB API endpoints
+- `apiV3url`: Base URL for all IB API v3 calls
+- `sid`: IntelligenceBank session ID (included in API request headers)
+
+### 3. api_call (Temporary/Reference Implementation)
+Makes authenticated API calls with automatic token refresh.
+
+**Implementation:**
+- Retrieves session by sessionId
+- Makes API call with current access token
+- Automatically refreshes token on 401 errors
+- Retries request once after refresh
+- Detects session expiry and prompts re-authentication
+
+**Input Schema:**
+```typescript
+{
+  sessionId: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
+  path: string,           // API endpoint path
+  body?: object,          // Request body (for POST/PUT/PATCH)
+  headers?: object        // Additional headers
+}
+```
+
+**Output:**
+```typescript
+{
+  success: boolean,
+  status: number,
+  data?: any,
+  error?: string
+}
+```
+
+**Note:** This is a temporary generic tool. Future specific IB API tools will implement the same token refresh pattern but with typed parameters and responses.
+
+### Removed Tools
+
+**auth_exchange** - Deprecated and removed. The `/callback` endpoint now handles authorization code exchange automatically. No longer needed in the new automatic flow.
 
 ## Environment Variables
 
