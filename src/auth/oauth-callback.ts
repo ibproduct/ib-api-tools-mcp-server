@@ -89,6 +89,15 @@ export class OAuthCallbackHandler {
 
             const tokens = await tokenResponse.json();
             console.log('Tokens received successfully');
+            
+            // Log what we received to help debug
+            console.log('Token response includes:', {
+                hasAccessToken: !!tokens.access_token,
+                hasRefreshToken: !!tokens.refresh_token,
+                hasSid: !!tokens.sid,
+                hasClientId: !!tokens.clientid,
+                hasApiV3url: !!tokens.apiV3url
+            });
 
             // Fetch user information
             console.log('Fetching user information...');
@@ -106,8 +115,8 @@ export class OAuthCallbackHandler {
                 console.warn('Failed to fetch user info, but continuing with authentication');
             }
 
-            // Update session with tokens and user info
-            this.sessionManager.updateSession(session.sessionId, {
+            // Update session with BOTH OAuth tokens AND IntelligenceBank session data
+            const sessionUpdate: any = {
                 status: 'completed',
                 tokens: {
                     accessToken: tokens.access_token,
@@ -116,7 +125,26 @@ export class OAuthCallbackHandler {
                     expiresIn: tokens.expires_in
                 },
                 userInfo: userInfo
-            });
+            };
+            
+            // Extract IntelligenceBank session data if present
+            if (tokens.sid && tokens.clientid && tokens.apiV3url) {
+                sessionUpdate.ibSession = {
+                    sid: tokens.sid,
+                    clientId: tokens.clientid,
+                    apiV3url: tokens.apiV3url,
+                    logintimeoutperiod: tokens.logintimeoutperiod,
+                    sidExpiry: tokens.sidExpiry,
+                    sidCreatedAt: tokens.sidCreatedAt
+                };
+                console.log('IntelligenceBank session data extracted:', {
+                    sid: tokens.sid.substring(0, 8) + '...',
+                    clientId: tokens.clientid,
+                    apiV3url: tokens.apiV3url
+                });
+            }
+            
+            this.sessionManager.updateSession(session.sessionId, sessionUpdate);
 
             console.log(`Authentication completed for session: ${session.sessionId}`);
 

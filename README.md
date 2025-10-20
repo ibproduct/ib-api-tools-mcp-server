@@ -111,22 +111,23 @@ use_mcp_tool ib-api-tools auth_status { "accessToken": "your-access-token" }
 
 ### api_call
 
-Makes authenticated API calls to IntelligenceBank with automatic token refresh.
+Makes authenticated API calls to IntelligenceBank using direct API access.
 
 **Input:**
 - `sessionId`: Session ID from successful authentication
 - `method`: HTTP method (GET, POST, PUT, DELETE, PATCH)
-- `path`: API endpoint path (e.g., `/api/v1/resources`)
+- `path`: API endpoint path (e.g., `/api/3.0.0/BnK4JV/resource`)
 - `body` (optional): Request body for POST/PUT/PATCH requests
-- `queryParams` (optional): URL query parameters
+- `headers` (optional): Additional headers
 
 **Output:**
 - `success`: Boolean indicating if request succeeded
 - `data`: Response data from the API
-- `statusCode`: HTTP status code
+- `status`: HTTP status code
 
 **Features:**
-- Automatic token refresh on 401 errors
+- Uses IntelligenceBank session ID (`sid`) for authentication
+- Clear error messages for authentication failures
 - Session expiry detection with re-authentication prompt
 - Retry logic for transient failures
 
@@ -135,8 +136,7 @@ Makes authenticated API calls to IntelligenceBank with automatic token refresh.
 use_mcp_tool ib-api-tools api_call {
   "sessionId": "your-session-id",
   "method": "GET",
-  "path": "/api/v1/resources",
-  "queryParams": { "limit": "10" }
+  "path": "/api/3.0.0/BnK4JV/resource"
 }
 ```
 
@@ -198,6 +198,7 @@ Required environment variables (see `.env.example`):
 
 Comprehensive documentation is available in the `docs/` directory:
 
+- **[Authentication Architecture](docs/authentication-architecture.md)**: Dual-authentication system explained
 - **[Development Workflow](docs/development-workflow.md)**: Local development, testing, and deployment
 - **[Tech Stack](docs/techStack.md)**: Technology choices and architecture
 - **[Codebase Summary](docs/codebaseSummary.md)**: Project structure and components
