@@ -1,7 +1,5 @@
 /**
  * HTML Page Generators for OAuth Flow
- * Extracted from index.ts lines 197-433
- * No logic changes - exact same HTML generation
  */
 
 export function generateSuccessPage(userInfo: any): string {

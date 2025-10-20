@@ -11,13 +11,13 @@ export class ApiCallTool {
     public readonly definition = {
         name: 'api_call',
         title: 'Make Authenticated API Call',
-        description: 'Make an authenticated API call to IntelligenceBank using the session ID (sid) obtained during authentication. All API calls are made directly to the IntelligenceBank API.',
+        description: 'Make an authenticated API call to IntelligenceBank. Authentication is automatic - the tool retrieves the IntelligenceBank session credentials (sid, clientId, apiV3url) from your authenticated session and includes them automatically. You only need to provide the sessionId from auth_login, the HTTP method, and the API path.',
         inputSchema: {
-            sessionId: z.string().describe('Session ID from auth_login'),
+            sessionId: z.string().describe('Your MCP session ID returned by auth_login (NOT the IntelligenceBank sid - that is handled automatically)'),
             method: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']).describe('HTTP method'),
             path: z.string().describe('API path (e.g., /api/3.0.0/12345/users) or full URL (e.g., company.intelligencebank.com/api/3.0.0/12345/users)'),
             body: z.any().optional().describe('Request body for POST/PUT/PATCH requests'),
-            headers: z.record(z.string()).optional().describe('Additional headers')
+            headers: z.record(z.string()).optional().describe('Additional custom headers (optional - authentication headers are added automatically, do NOT include sid)')
         },
         outputSchema: {
             success: z.boolean(),

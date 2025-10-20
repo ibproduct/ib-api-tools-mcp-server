@@ -31,24 +31,39 @@
 - **biome**: Code formatting and linting
 - **@types/***: TypeScript type definitions
 
-## Authentication Architecture
+## Authentication Architecture (Dual System)
 
-### OAuth 2.0 Implementation
+### Overview
+The server implements a **dual-authentication system**:
+1. **OAuth 2.0 Tokens**: For MCP protocol compliance
+2. **IntelligenceBank Session Credentials**: For actual API calls
+
+See [`docs/authentication-audit.md`](authentication-audit.md) for comprehensive explanation.
+
+### OAuth 2.0 Implementation (MCP Compliance)
 - **Flow**: Authorization Code Flow with PKCE
 - **Bridge Service**: AWS Lambda at `https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev`
 - **Token Type**: JWT access tokens with 1-hour expiry
+- **Purpose**: Satisfy MCP SDK OAuth 2.0 requirement
 - **Security**: PKCE (code_verifier/code_challenge), state parameter for CSRF protection
 
-### OAuth Endpoints
+### IntelligenceBank Session Credentials (API Access)
+- **Credentials**: `sid`, `clientId`, `apiV3url` extracted from OAuth bridge
+- **Source**: Token response from OAuth bridge includes IB session data
+- **Usage**: `sid` sent as header in all IntelligenceBank API calls
+- **Lifetime**: 1-120 hours based on `logintimeoutperiod`
+- **Expiry Handling**: 401 responses trigger re-authentication via auth_login
+
+### OAuth Bridge Endpoints
 - **/authorize**: Initiate OAuth flow with PKCE parameters
-- **/token**: Exchange authorization code for access/refresh tokens
-- **/proxy/{platform}/{path}**: Proxied IntelligenceBank API calls
+- **/token**: Exchange code for tokens + IntelligenceBank session data
 - **/userinfo**: Validate token and retrieve user information
 
 ### Session Management
-- **Timeout**: 1-120 hour configurable session lifetime
-- **Refresh Window**: 5-minute window before expiry
-- **Re-authentication**: Automatic prompt on session expiry
+- **MCP Sessions**: 5-minute TTL for OAuth flow tracking
+- **IB Sessions**: 1-120 hours based on IntelligenceBank configuration
+- **Token Refresh**: OAuth tokens can be refreshed (not actively used)
+- **Re-authentication**: Required when IB session expires (401 error)
 
 ## Transport Layer
 
@@ -94,15 +109,29 @@
 
 ## Project Organization
 
-### Source Code Structure
+### Source Code Structure (Modular Architecture)
 ```
 src/
-├── index.ts          # Main HTTP server and MCP implementation
-├── auth.ts           # Legacy authentication (to be removed)
-├── auth-state.ts     # Legacy state management (to be removed)
-├── types.ts          # TypeScript type definitions
-└── tools/
-    └── status.ts     # Tool implementations
+├── index.ts                 # Main server entry point
+├── types.ts                 # Legacy types (to be removed)
+├── auth/                    # OAuth protocol implementation
+│   ├── oauth-callback.ts    # OAuth callback handler
+│   ├── oauth-utils.ts       # PKCE utilities
+│   ├── token-manager.ts     # Token refresh logic
+│   └── html-pages.ts        # Success/error HTML pages
+├── core/                    # Core infrastructure
+│   └── tool-registry.ts     # Tool registration helper
+├── server/                  # HTTP server setup
+│   └── express-setup.ts     # Express app configuration
+├── session/                 # Session management
+│   └── SessionManager.ts    # Auth session lifecycle
+├── tools/                   # MCP tool implementations
+│   ├── auth-login.tool.ts   # Start OAuth flow
+│   ├── auth-status.tool.ts  # Check auth status
+│   ├── api-call.tool.ts     # Make authenticated API calls
+│   └── status.ts            # Legacy status tool
+└── types/                   # Type definitions
+    └── session.types.ts     # AuthSession interface
 ```
 
 ### Documentation

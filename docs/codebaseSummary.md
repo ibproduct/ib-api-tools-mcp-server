@@ -12,16 +12,32 @@
 │   ├── projectRoadmap.md         # Goals and progress
 │   ├── techStack.md              # Technology stack details
 │   └── transport.md              # Transport specification
-├── scripts/                      # Legacy installation scripts (deprecated)
-│   ├── dev-install.sh           # Legacy dev installation
-│   └── prod-install.sh          # Legacy prod installation
-├── src/                         # Source code
-│   ├── index.ts                 # Main HTTP server and MCP implementation
-│   ├── auth.ts                  # Legacy auth (to be removed)
-│   ├── auth-state.ts            # Legacy state management (to be removed)
-│   ├── types.ts                 # TypeScript type definitions
-│   └── tools/
-│       └── status.ts            # Tool implementations
+├── scripts/                      # Deployment and utility scripts
+│   ├── deploy.sh                # Production deployment script
+│   ├── dev-install.sh           # Development setup
+│   ├── prod-install.sh          # Production setup
+│   └── ec2-user-data.sh         # EC2 instance initialization
+├── src/                         # Source code (modular architecture)
+│   ├── index.ts                 # Main server entry point
+│   ├── types.ts                 # Legacy types (to be removed)
+│   ├── auth/                    # OAuth protocol implementation
+│   │   ├── oauth-callback.ts    # OAuth callback handler
+│   │   ├── oauth-utils.ts       # PKCE utilities
+│   │   ├── token-manager.ts     # Token refresh logic
+│   │   └── html-pages.ts        # Success/error HTML pages
+│   ├── core/                    # Core infrastructure
+│   │   └── tool-registry.ts     # Tool registration helper
+│   ├── server/                  # HTTP server setup
+│   │   └── express-setup.ts     # Express app configuration
+│   ├── session/                 # Session management
+│   │   └── SessionManager.ts    # Auth session lifecycle
+│   ├── tools/                   # MCP tool implementations
+│   │   ├── auth-login.tool.ts   # Start OAuth flow
+│   │   ├── auth-status.tool.ts  # Check auth status
+│   │   ├── api-call.tool.ts     # Make authenticated API calls
+│   │   └── status.ts            # Legacy status tool
+│   └── types/                   # Type definitions
+│       └── session.types.ts     # AuthSession interface
 ├── .env.example                 # Environment variable template
 ├── biome.json                   # Code formatting/linting config
 ├── package.json                 # Dependencies and scripts
@@ -37,10 +53,12 @@
 - **Mode**: Stateless (new transport per request)
 - **CORS**: Enabled for browser-based clients
 
-### Authentication System
+### Authentication System (Dual Architecture)
 - **Method**: OAuth 2.0 Authorization Code Flow with PKCE
 - **Bridge Service**: AWS Lambda at `https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev`
-- **Token Type**: JWT access tokens (1-hour expiry)
+- **OAuth Tokens**: JWT access tokens (1-hour expiry) - for MCP protocol compliance
+- **IB Session Credentials**: `sid`, `clientId`, `apiV3url` - for actual API calls
+- **Session Lifetime**: 1-120 hours (configurable via `logintimeoutperiod`)
 - **Security**: PKCE verification, state parameter, DNS rebinding protection
 
 ### Server Implementation
@@ -55,121 +73,172 @@
 
 ## Key Components
 
-### HTTP Server (src/index.ts)
-Main application entry point that implements:
-- Express.js server setup
-- StreamableHTTPServerTransport configuration
-- CORS middleware
-- DNS rebinding protection
-- OAuth authentication tools
-- Health check endpoints
+### Main Server (src/index.ts)
+Application entry point that orchestrates all components:
+- Initializes SessionManager for auth session tracking
+- Creates OAuthCallbackHandler for token exchange
+- Registers MCP tools (auth_login, auth_status, api_call)
+- Sets up Express routes (/callback, /mcp)
+- Handles graceful shutdown
 
-**Key Functions:**
+### Session Management (src/session/SessionManager.ts)
+Manages authentication session lifecycle:
+- Creates and tracks auth sessions with unique IDs
+- Stores OAuth tokens and IntelligenceBank credentials
+- Automatic cleanup of expired sessions (5-minute TTL)
+- Session lookup by ID or OAuth state parameter
+
+### OAuth Components (src/auth/)
+
+#### OAuth Callback Handler (oauth-callback.ts)
+Handles OAuth redirect and token exchange:
+- Exchanges authorization code for tokens
+- Extracts BOTH OAuth tokens AND IntelligenceBank session data
+- Fetches user information
+- Returns success/error HTML pages
+
+**Critical Logic:**
+- Extracts `sid`, `clientId`, `apiV3url` from OAuth bridge token response
+- Stores in `session.ibSession` for API calls
+- Displays success page with user confirmation
+
+#### OAuth Utilities (oauth-utils.ts)
+PKCE and OAuth parameter generation:
 - `generateCodeVerifier()`: Creates PKCE code_verifier (32-byte random)
 - `generateCodeChallenge()`: Computes SHA-256 code_challenge from verifier
 - `generateState()`: Generates CSRF protection state parameter
 
-### OAuth Tools
+#### HTML Pages (html-pages.ts)
+User-facing pages for OAuth flow:
+- Success page: Confirmation after successful authentication
+- Error page: Error details when authentication fails
 
-#### 1. auth_login
-Initiates OAuth 2.0 flow with PKCE parameters.
+#### Token Manager (token-manager.ts)
+OAuth token refresh logic:
+- Refreshes OAuth access tokens using refresh token
+- Note: Currently not actively used (see authentication-audit.md)
+- Kept for MCP protocol compliance
+
+### MCP Tools (src/tools/)
+
+#### 1. auth_login.tool.ts
+MCP tool to start OAuth 2.0 flow.
 
 **Input:**
 - `platformUrl` (optional): IntelligenceBank instance URL
 
 **Output:**
 - `authorizationUrl`: URL for user authentication
-- `state`: CSRF protection parameter
-- `codeVerifier`: PKCE parameter for token exchange
+- `sessionId`: Session ID for tracking authentication
+- `instructions`: User-friendly next steps
 
 **Flow:**
-1. Generate PKCE code_verifier (random 32-byte base64url)
-2. Compute code_challenge (SHA-256 hash of verifier)
-3. Generate state parameter (random 16-byte base64url)
+1. Generate PKCE parameters (code_verifier, code_challenge)
+2. Generate OAuth state parameter
+3. Create session in SessionManager
 4. Build authorization URL with all parameters
-5. Return URL and parameters to client
+5. Return URL and session ID to client
 
-#### 2. auth_exchange
-Exchanges authorization code for access tokens.
-
-**Input:**
-- `code`: Authorization code from OAuth callback
-- `codeVerifier`: PKCE parameter from login step
-- `state` (optional): State parameter for validation
-
-**Output:**
-- `accessToken`: JWT access token
-- `tokenType`: "Bearer"
-- `expiresIn`: Seconds until expiry (3600)
-- `refreshToken`: Token for session renewal
-
-**Flow:**
-1. Validate inputs
-2. POST to OAuth bridge `/token` endpoint
-3. Include code, codeVerifier, and PKCE verification
-4. Return tokens to client
-
-#### 3. auth_status
-Validates token and retrieves user information.
+#### 2. auth_status.tool.ts
+MCP tool to check authentication status.
 
 **Input:**
-- `accessToken`: JWT access token
+- `sessionId`: Session ID from auth_login
+
+**Output (pending):**
+- `status`: "pending"
+- `authenticated`: false
+
+**Output (completed):**
+- `status`: "completed"
+- `authenticated`: true
+- `tokens`: OAuth access and refresh tokens
+- `userInfo`: User details
+
+**Output (error):**
+- `status`: "error"
+- `error`: Error code
+- `errorDescription`: Error details
+
+#### 3. api_call.tool.ts
+MCP tool to make authenticated IntelligenceBank API calls.
+
+**Input:**
+- `sessionId`: Session ID from successful authentication
+- `method`: HTTP method (GET, POST, PUT, DELETE, PATCH)
+- `path`: API endpoint path or full URL
+- `body` (optional): Request body
+- `headers` (optional): Additional headers
 
 **Output:**
-- `authenticated`: Boolean validity status
-- `userInfo`: User details (if valid)
+- `success`: Boolean indicating success
+- `status`: HTTP status code
+- `data`: Response data
 
-**Flow:**
-1. GET OAuth bridge `/userinfo` endpoint
-2. Include Authorization header with Bearer token
-3. Return user information or error
+**Key Features:**
+- Uses `sid` from `session.ibSession` for authentication
+- Makes direct API calls (no proxy)
+- Handles 401 by marking session as expired
+- Prompts user to re-authenticate via auth_login
 
-### Legacy Components (To Be Removed)
+### Type Definitions (src/types/)
 
-**src/auth.ts**
-- Old direct IB API browser-based authentication
-- No longer used with OAuth bridge implementation
-- Kept temporarily for reference
-
-**src/auth-state.ts**
-- Old polling-based state management
-- Not needed with stateless HTTP transport
-- To be removed in cleanup
-
-**scripts/dev-install.sh & prod-install.sh**
-- Legacy local installation scripts
-- Replaced by EC2 deployment workflow
-- May be removed or repurposed
+#### session.types.ts
+Defines `AuthSession` interface with dual authentication:
+```typescript
+{
+  sessionId: string;           // MCP session tracking
+  state: string;               // OAuth state parameter
+  codeVerifier: string;        // PKCE code verifier
+  
+  tokens: {                    // OAuth tokens (MCP compliance)
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+  };
+  
+  ibSession: {                 // IntelligenceBank credentials (API calls)
+    sid: string;               // Session ID for direct API calls
+    clientId: string;          // IB client ID
+    apiV3url: string;          // IB API base URL
+    logintimeoutperiod: number; // Session validity (1-120 hours)
+    sidExpiry: number;         // Unix timestamp when sid expires
+  };
+}
+```
 
 ## Data Flow
 
-### OAuth Authentication Flow
+### OAuth Authentication Flow (Automatic)
 
 ```
 1. Client → MCP Server: auth_login request
-2. MCP Server → Client: authorizationUrl, state, codeVerifier
-3. User → OAuth Bridge: Visit authorization URL
+2. MCP Server → Client: authorizationUrl, sessionId
+3. User → OAuth Bridge: Visit authorization URL in browser
 4. User → OAuth Bridge: Select platform, log in
-5. OAuth Bridge → User: Redirect to callback with code
-6. Client → MCP Server: auth_exchange with code, codeVerifier
-7. MCP Server → OAuth Bridge: POST /token with PKCE verification
-8. OAuth Bridge → MCP Server: Return access/refresh tokens
-9. MCP Server → Client: Return tokens
-10. Client → MCP Server: auth_status with accessToken
-11. MCP Server → OAuth Bridge: GET /userinfo
-12. OAuth Bridge → MCP Server: Return user information
-13. MCP Server → Client: Return authenticated status
+5. OAuth Bridge → User: Redirect to /callback with authorization code
+6. MCP Server (/callback): Exchange code for tokens automatically
+7. OAuth Bridge → MCP Server: Return access/refresh tokens + IB credentials
+8. MCP Server: Extract sid, clientId, apiV3url from response
+9. MCP Server: Store in session.ibSession
+10. MCP Server → User: Display success HTML page
+11. Client → MCP Server: Poll auth_status with sessionId
+12. MCP Server → Client: Return tokens and user info
 ```
 
-### API Request Flow (Future)
+### API Request Flow (Direct)
 
 ```
-1. Client → MCP Server: API tool request with accessToken
-2. MCP Server → OAuth Bridge: POST /proxy/{platform}/{path}
-3. OAuth Bridge → IB API: Proxied request with credentials
-4. IB API → OAuth Bridge: API response
-5. OAuth Bridge → MCP Server: Proxied response
-6. MCP Server → Client: Tool result
+1. Client → MCP Server: api_call with sessionId
+2. MCP Server: Retrieve session.ibSession.sid
+3. MCP Server → IB API: Direct request with sid header
+4. IB API → MCP Server: API response
+5. MCP Server → Client: Tool result
+
+On 401 Error:
+6. MCP Server: Mark session as expired
+7. MCP Server → Client: Error with re-authentication prompt
+8. User must call auth_login again
 ```
 
 ## External Dependencies

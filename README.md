@@ -198,12 +198,20 @@ Required environment variables (see `.env.example`):
 
 Comprehensive documentation is available in the `docs/` directory:
 
-- **[Authentication Architecture](docs/authentication-architecture.md)**: Dual-authentication system explained
+- **[Authentication Audit](docs/authentication-audit.md)**: Comprehensive authentication architecture analysis
 - **[Development Workflow](docs/development-workflow.md)**: Local development, testing, and deployment
 - **[Tech Stack](docs/techStack.md)**: Technology choices and architecture
 - **[Codebase Summary](docs/codebaseSummary.md)**: Project structure and components
 - **[Current Task](docs/currentTask.md)**: Current development status
 - **[Project Roadmap](docs/projectRoadmap.md)**: Goals and progress
+
+### Key Concepts
+
+**Dual-Authentication System:**
+- **OAuth 2.0 Tokens**: Used for MCP protocol compliance (access_token, refresh_token)
+- **IntelligenceBank Credentials**: Used for actual API calls (sid, clientId, apiV3url)
+
+The OAuth bridge returns both types of credentials in the token response. OAuth tokens satisfy the MCP SDK requirement, while IntelligenceBank session credentials (`sid`) are used for direct API calls.
 
 ## Production Deployment
 
