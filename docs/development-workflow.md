@@ -158,27 +158,33 @@ Restart Claude desktop and verify the connection.
    ```
 
 4. **Deploy to Production for Testing**
-   ```bash
-   # Copy built file to EC2 via /tmp (avoids permission issues)
-   scp -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem \
-     dist/index.js ubuntu@52.9.99.47:/tmp/index.js
    
-   # SSH in, move file, and restart server
+   **Important**: With the new modular structure, we deploy the entire `dist/` directory, not just a single file.
+   
+   ```bash
+   # Build and package the application
+   npm run build
+   tar -czf dist-deploy.tar.gz dist/
+   
+   # Copy deployment package to EC2 via /tmp (avoids permission issues)
+   scp -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem \
+     dist-deploy.tar.gz ubuntu@52.9.99.47:/tmp/
+   
+   # SSH in, extract, and restart server
    ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47 \
-     "sudo cp /tmp/index.js /opt/ib-api-tools-mcp-server/dist/index.js && \
+     "sudo tar -xzf /tmp/dist-deploy.tar.gz -C /opt/ib-api-tools-mcp-server/ && \
+      sudo chown -R ec2-user:ec2-user /opt/ib-api-tools-mcp-server/dist && \
       pm2 restart ib-mcp-server && \
       pm2 logs ib-mcp-server --lines 15"
+   
+   # Clean up local package
+   rm dist-deploy.tar.gz
    ```
    
-   **Alternative (single command):**
+   **Alternative (automated script):**
    ```bash
-   cd /path/to/ib-api-tools-mcp-server && \
-   scp -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem \
-     dist/index.js ubuntu@52.9.99.47:/tmp/index.js && \
-   ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47 \
-     "sudo cp /tmp/index.js /opt/ib-api-tools-mcp-server/dist/index.js && \
-      pm2 restart ib-mcp-server && \
-      pm2 logs ib-mcp-server --lines 15"
+   # Use the main deployment script
+   ./scripts/deploy.sh
    ```
 
 5. **Test on Production**
@@ -345,6 +351,14 @@ curl -X POST https://mcp.connectingib.com/mcp \
 **What Gets Deployed to EC2:**
 - `/opt/ib-api-tools-mcp-server/src/` - Source code
 - `/opt/ib-api-tools-mcp-server/dist/` - Compiled JavaScript (built from src/)
+  - With modular structure, this includes:
+    - `dist/index.js` - Main entry point
+    - `dist/types/` - Type definitions
+    - `dist/session/` - Session management module
+    - `dist/auth/` - OAuth modules
+    - `dist/tools/` - Tool implementations
+    - `dist/core/` - Core infrastructure
+    - `dist/server/` - Server setup
 - `/opt/ib-api-tools-mcp-server/node_modules/` - Runtime dependencies
 - `/opt/ib-api-tools-mcp-server/package.json` - Dependency manifest
 - `/opt/ib-api-tools-mcp-server/tsconfig.json` - TypeScript configuration
