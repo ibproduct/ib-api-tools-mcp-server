@@ -1,8 +1,9 @@
 /**
  * Session Types
- * Updated to support dual-authentication architecture:
+ * Updated to support multiple authentication methods:
  * - OAuth tokens for MCP protocol compliance
  * - IntelligenceBank session credentials for direct API calls
+ * - Browser-based direct authentication
  */
 
 export interface AuthSession {
@@ -11,14 +12,22 @@ export interface AuthSession {
     state: string;
     clientId: string;
     redirectUri: string;
-    status: 'pending' | 'completed' | 'error';
+    status: 'pending' | 'completed' | 'error' | 'browser_pending';
+    
+    // OAuth-specific data
     tokens?: {
         accessToken: string;
         refreshToken: string;
         tokenType: string;
         expiresIn: number;
     };
-    // IntelligenceBank session data from OAuth bridge
+    
+    // Browser login-specific data
+    platformUrl?: string;      // IB platform URL for browser login
+    browserToken?: string;     // Token from /v1/auth/app/token (content field)
+    browserSID?: string;       // SID from /v1/auth/app/token
+    
+    // IntelligenceBank session data (from OAuth bridge OR browser login)
     ibSession?: {
         sid: string;           // IB session ID for direct API calls
         clientId: string;      // IB client ID (not OAuth client ID)
@@ -27,6 +36,7 @@ export interface AuthSession {
         sidExpiry?: number;    // Unix timestamp when session expires
         sidCreatedAt?: number; // Unix timestamp when session was created
     };
+    
     userInfo?: any;
     error?: string;
     errorDescription?: string;

@@ -19,6 +19,7 @@ import { ToolRegistry } from './core/tool-registry.js';
 import { AuthLoginTool } from './tools/auth-login.tool.js';
 import { AuthStatusTool } from './tools/auth-status.tool.js';
 import { ApiCallTool } from './tools/api-call.tool.js';
+import { BrowserLoginStartTool, BrowserLoginCompleteTool } from './tools/browser-login.tool.js';
 
 // ============================================================================
 // Initialize Components
@@ -41,6 +42,10 @@ const toolRegistry = new ToolRegistry();
 toolRegistry.register(new AuthLoginTool(sessionManager));
 toolRegistry.register(new AuthStatusTool(sessionManager));
 toolRegistry.register(new ApiCallTool(sessionManager));
+
+// Register browser login tools
+toolRegistry.register(new BrowserLoginStartTool(sessionManager));
+toolRegistry.register(new BrowserLoginCompleteTool(sessionManager));
 
 // ============================================================================
 // MCP Server Setup
@@ -108,6 +113,8 @@ app.listen(port, () => {
     console.log('  - auth_login: Start OAuth 2.0 login flow');
     console.log('  - auth_status: Check authentication status');
     console.log('  - api_call: Make authenticated API calls with automatic token refresh');
+    console.log('  - browser_login_start: Start browser-based direct login (alternative to OAuth)');
+    console.log('  - browser_login_complete: Complete browser-based login after user authentication');
 }).on('error', (error) => {
     console.error('Server error:', error);
     process.exit(1);
