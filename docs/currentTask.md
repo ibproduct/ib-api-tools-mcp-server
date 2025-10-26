@@ -1,321 +1,422 @@
-# Current Task: Browser-Based Direct Authentication Flow
+# Current Task: File Handling Architecture for Remote MCP Server
 
-## Context
+## Status: ✅ Implementation Complete - Ready for Testing
 
-We want to test a **simpler, browser-based authentication approach** that bypasses the OAuth wrapper complexity entirely. This uses IntelligenceBank's native browser login API to directly obtain session credentials (`sid`, `clientId`, `apiV3url`).
+## Overview
 
-## Current Architecture (OAuth-based)
+Addressing a critical file handling issue discovered during production testing of the compliance review tools. The current implementation fails when users upload files to Claude's interface due to a fundamental architecture mismatch between local and remote MCP servers.
 
-The existing system uses:
-1. **OAuth 2.0 Bridge**: AWS Lambda service that wraps IB authentication
-2. **Dual Authentication**: OAuth tokens (MCP compliance) + IB session (API calls)
-3. **Multiple API Calls**: `/authorize` → user login → `/callback` → `/token` exchange → extract IB session
+---
 
-## Proposed Architecture (Browser-based Direct)
+## Problem Statement
 
-A simplified flow that directly uses IntelligenceBank's browser login API:
+### Critical Issue Discovered
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant AI as Claude/AI Assistant
-    participant MCP as MCP Server
-    participant Browser
-    participant IB as IntelligenceBank Platform
+The compliance review tool fails when used with Claude's file upload feature, causing conversations to become unusable.
 
-    User->>AI: I want to use IntelligenceBank
-    AI->>MCP: browser_login_start(platformUrl?)
-    
-    alt Platform URL not provided
-        MCP->>User: What is your platform URL?
-        User->>MCP: https://company.intelligencebank.com
-    end
-    
-    MCP->>IB: POST /v1/auth/app/token
-    IB->>MCP: {SID, content: "EPEjv7Za3"}
-    
-    MCP->>Browser: Open https://company.ib.com/auth/?login=0&token=EPEjv7Za3
-    MCP->>User: Please complete authentication in browser
-    
-    User->>Browser: Logs in to IntelligenceBank
-    Browser->>IB: User authenticates
-    
-    User->>AI: I've completed authentication
-    AI->>MCP: browser_login_complete(sessionId, token: "EPEjv7Za3")
-    
-    MCP->>IB: GET /v1/auth/app/info?token=EPEjv7Za3
-    IB->>MCP: {session: {sid, userUuid}, info: {clientid, apiV3url, ...}}
-    
-    MCP->>MCP: Store sid, clientId, apiV3url in session
-    MCP->>User: ✓ Authenticated successfully
-    
-    User->>AI: Get my resources
-    AI->>MCP: api_call(sessionId, GET, /api/3.0.0/...)
-    MCP->>IB: GET /api/3.0.0/... (header: sid)
-    IB->>MCP: Resource data
-    MCP->>User: Here are your resources
+#### Current Problematic Flow
+
+1. User uploads a file (e.g., 1.6MB PDF) to Claude's interface
+2. Claude provides a local file path: `/mnt/user-data/uploads/[AU]_MyBank.pdf`
+3. User requests: "Please run a review for this file"
+4. Claude calls our MCP tool [`run_file_compliance_review`](../src/tools/run-file-compliance-review.tool.ts:1) with the file path
+5. **Problem**: Our remote EC2 server cannot access Claude's local filesystem at `/mnt/user-data/uploads/`
+6. File upload to IntelligenceBank fails with `400 Bad Request`
+7. **Critical Issue**: Claude attempts to recover by reading the file and converting it to base64 within the conversation
+8. The base64 output (~2.1MB for a 1.6MB file) appears in the conversation history
+9. This consumes ALL available context tokens, killing the conversation
+
+#### Impact
+
+- Conversations become unusable after attempting to process files
+- Cannot complete compliance review workflows with uploaded files
+- Severe user experience degradation
+- Expected file sizes: 1.6MB typical, up to 50MB possible
+
+### Root Cause Analysis
+
+#### Architecture Mismatch
+
+The issue stems from a fundamental mismatch between:
+- **Local MCP Servers**: Can access files via filesystem paths
+- **Remote MCP Servers** (our deployment): Cannot access client's local filesystem
+
+Our current tool implementation accepts file paths as input ([`run-file-compliance-review.tool.ts:79-88`](../src/tools/run-file-compliance-review.tool.ts:79-88)), which works for local deployments but fails for remote deployments.
+
+#### Why Base64 Conversion Fails
+
+While our tool schema supports base64 content as an alternative, Claude (the LLM) currently:
+1. First attempts to use the file path directly (fails on remote server)
+2. Then converts the file to base64 within the conversation context (consumes all tokens)
+3. The base64 string appears in conversation history, polluting context
+
+For a 1.6MB file:
+- Original size: 1.6MB
+- Base64 encoded: ~2.1MB of text
+- Token count: ~560,000 tokens (well beyond most context limits)
+
+---
+
+## Solution Options Analysis
+
+### Option 1: MCP Resources with Blob Support ❌ Not Currently Feasible
+
+Leverage the MCP protocol's resource system to handle binary data efficiently.
+
+**Concept**:
+```typescript
+// Tool accepts resource URI instead of file content
+{ file: "resource://claude-files/[AU]_MyBank.pdf" }
+
+// MCP server requests the resource from Claude
+const fileContent = await client.readResource("resource://claude-files/[AU]_MyBank.pdf");
 ```
 
-## Browser Login API Flow
+**Advantages**:
+- No base64 encoding in conversation context
+- Efficient binary data transfer
+- Follows MCP protocol standards
+- Clean separation of concerns
 
-### Step 1: Initiate Browser Login
-**Endpoint:** `POST https://{{platformUrl}}/v1/auth/app/token`
+**Disadvantages**:
+- Requires MCP SDK and Claude to implement resource blob support
+- Not currently available in MCP v1.20.1
+- Would require waiting for protocol enhancement
 
-**Response:**
-```json
-{
-    "SID": "c9sim2jucii3fulckgthfgruh7",
-    "content": "EPEjv7Za3"
-}
+**Status**: Not currently feasible - requires upstream protocol changes
+
+---
+
+### Option 2: Multipart Upload Endpoint ✅ Recommended
+
+Add a dedicated file upload endpoint to our MCP server that accepts multipart/form-data, separate from the MCP tool protocol.
+
+**Architecture**:
+```
+POST /upload (multipart/form-data)
+  ↓
+Server stores file temporarily with unique ID
+  ↓
+Returns: { fileId: "upload-abc123", filename: "doc.pdf", expiresAt: timestamp }
+  ↓
+run_file_compliance_review({ fileId: "upload-abc123", ... })
+  ↓
+Server retrieves file from temp storage
+  ↓
+Upload to IntelligenceBank
+  ↓
+Cleanup temp file
 ```
 
-### Step 2: Open Browser for Authentication
-**URL:** `https://{{platformUrl}}/auth/?login=0&token={{content}}`
+**Advantages**:
+- ✅ Immediate implementation with existing technology
+- ✅ No conversation context pollution
+- ✅ Supports large files (up to 50MB+)
+- ✅ Clean separation: upload ≠ processing
+- ✅ Automatic cleanup of temporary files
+- ✅ Works with current MCP protocol
 
-User completes authentication in browser (no redirect back to MCP server needed).
+**Disadvantages**:
+- Requires two-step user flow (upload, then review)
+- Adds complexity to tool usage
+- Requires Claude to learn the two-step process
+- File storage management needed
 
-### Step 3: Complete Authentication
-**Endpoint:** `GET https://{{platformUrl}}/v1/auth/app/info?token={{content}}`
+**Implementation Complexity**: Medium (1-2 days)
 
-**Response:**
-```json
-{
-    "SID": "c9sim2jucii3fulckgthfgruh7",
-    "content": {
-        "session": {
-            "sid": "583fnd6cu83t72ruddgeubpcq4",
-            "userUuid": "85c14d9c716d11284aadff372ab6f01f",
-            "originalUserUuid": null,
-            "loginTime": 1578413767
-        },
-        "info": {
-            "clientname": "The IntelligenceBank Trial",
-            "clientuuid": "fe97709573d7929e8cba2f21fa8fb1ca",
-            "clientid": "8yqy",
-            "sid": "583fnd6cu83t72ruddgeubpcq4",
-            "apikey": "423680dd45b57239424fd6301a608f2d",
-            "apiV3url": "https://lbv3us1.intelligencebank.com",
-            "logintimeoutperiod": 120,
-            ...
-        }
-    }
-}
-```
+**Key Components**:
+1. New endpoint: `POST /upload` with multer middleware
+2. Temporary file storage: `/tmp/ib-mcp-uploads/`
+3. File ID generation: Cryptographically random
+4. Automatic cleanup: 5-minute TTL
+5. Modified tool: Accept `fileId` OR base64 content
 
-## Required Session Data
+---
 
-From the final response, we must store:
+### Option 3: Streaming Multipart in Tool ❌ Doesn't Solve Core Issue
 
-1. **`sid`** (from `content.session.sid`): Session ID for all API calls
-2. **`clientid`** (from `content.info.clientid`): IB client identifier  
-3. **`apiV3url`** (from `content.info.apiV3url`): API base URL
-4. **`logintimeoutperiod`** (from `content.info.logintimeoutperiod`): Session lifetime in hours
+Accept base64 content in the tool but process it as a stream to avoid loading into memory.
 
-These are stored in the existing `AuthSession.ibSession` structure.
+**Status**: Not recommended - doesn't solve the core issue of context consumption. The base64 data would still appear in conversation history.
 
-## Implementation Plan
+---
 
-### Phase 1: Create New Browser Login Tool ✓
+### Option 4: File Proxy Service ❌ Over-engineered
 
-- [ ] Create `src/tools/browser-login.tool.ts`
-  - [ ] `browser_login_start` - Initiates flow, returns browser URL
-  - [ ] `browser_login_complete` - Completes flow, fetches credentials
-- [ ] Add tool registration in `src/index.ts`
-- [ ] Update SessionManager to support browser login sessions
-- [ ] Add browser login session type to `session.types.ts`
+Create a separate file proxy service that Claude can access.
 
-### Phase 2: Implement Browser Login Flow
+**Status**: Not recommended - too complex for current needs. Requires additional infrastructure and security considerations.
 
-#### Tool 1: browser_login_start
+---
 
-**Input:**
-- `platformUrl` (optional): IntelligenceBank platform URL
+## Recommended Solution: Option 2 - Multipart Upload Endpoint
 
-**Process:**
-1. If `platformUrl` not provided, return error asking for it
-2. Call `POST https://{{platformUrl}}/v1/auth/app/token`
-3. Create MCP session with:
-   - `sessionId`: Generated MCP session ID
-   - `platformUrl`: User's platform
-   - `browserToken`: The `content` value from response
-   - `browserSID`: The `SID` value from response
-   - `status`: 'browser_pending'
-4. Construct browser URL: `https://{{platformUrl}}/auth/?login=0&token={{content}}`
+### Implementation Plan
 
-**Output:**
-```json
-{
-  "sessionId": "abc123...",
-  "browserUrl": "https://company.ib.com/auth/?login=0&token=EPEjv7Za3",
-  "instructions": "Please visit the URL above in your browser and complete the login process. Once you've logged in, let me know and I'll complete the authentication."
-}
-```
+**Phase 1: Add Upload Endpoint** (Day 1, 4 hours)
+1. Install dependencies: `multer` for file upload handling
+2. Create [`src/server/upload-handler.ts`](../src/server/upload-handler.ts:1)
+3. Add `/upload` endpoint to Express server
+4. Implement temporary file storage in `/tmp/ib-mcp-uploads/`
+5. Implement file cleanup mechanism (5-minute TTL)
+6. Add security measures:
+   - File size limits (50MB max)
+   - File type validation
+   - Rate limiting
+   - Unique, non-guessable file IDs
 
-#### Tool 2: browser_login_complete
+**Phase 2: Modify Compliance Review Tool** (Day 1, 3 hours)
+1. Update tool input schema to accept `fileId` OR base64 content
+2. Modify [`getFileInfo()`](../src/tools/run-file-compliance-review.tool.ts:299) to handle file ID lookups
+3. Update tool description with upload instructions
+4. Add file cleanup after successful upload to IntelligenceBank
+5. Maintain backward compatibility with base64 input (for small files)
 
-**Input:**
-- `sessionId`: Session ID from browser_login_start
+**Phase 3: Documentation and Testing** (Day 2, 4 hours)
+1. Update [`README.md`](../README.md:1) with two-step workflow
+2. Update tool descriptions with clear instructions
+3. Add error handling for missing/expired files
+4. Test with various file sizes (100KB, 1.6MB, 10MB, 50MB)
+5. Document limitations and best practices
+6. Update [`docs/codebaseSummary.md`](codebaseSummary.md:1)
 
-**Process:**
-1. Retrieve session from SessionManager
-2. Verify session exists and status is 'browser_pending'
-3. Call `GET https://{{platformUrl}}/v1/auth/app/info?token={{browserToken}}`
-4. Extract and store in `session.ibSession`:
-   - `sid`: From `content.session.sid`
-   - `clientId`: From `content.info.clientid`
-   - `apiV3url`: From `content.info.apiV3url`
-   - `logintimeoutperiod`: From `content.info.logintimeoutperiod`
-5. Store user info in `session.userInfo`
-6. Update session status to 'completed'
+### Updated Tool Interface
 
-**Output:**
-```json
-{
-  "status": "completed",
-  "authenticated": true,
-  "userInfo": {
-    "firstName": "John",
-    "lastName": "Doe",
-    "email": "john@example.com"
+```typescript
+// Option A: Upload first, then reference (Recommended for files >100KB)
+const uploadResponse = await fetch('https://mcp.connectingib.com/upload', {
+  method: 'POST',
+  body: formData  // File from Claude's upload
+});
+const { fileId } = await uploadResponse.json();
+
+// Then use in tool
+run_file_compliance_review({
+  sessionId: "session-id",
+  fileId: fileId,  // Reference to uploaded file
+  categorization: [...]
+});
+
+// Option B: Direct base64 (Backward compatibility for small files <100KB)
+run_file_compliance_review({
+  sessionId: "session-id",
+  file: {
+    content: "base64...",
+    filename: "doc.pdf"
   },
-  "sessionExpiry": "2025-02-01T15:30:00Z"
+  categorization: [...]
+});
+```
+
+### Updated Tool Description
+
+The tool description will be updated to include:
+
+```
+IMPORTANT - FILE UPLOAD FOR REMOTE SERVER:
+
+This MCP server runs remotely and cannot access local file paths. 
+Use one of these methods:
+
+METHOD 1 (Recommended for files >100KB):
+1. First upload the file to our server:
+   POST https://mcp.connectingib.com/upload
+   Content-Type: multipart/form-data
+   
+   Response: { "fileId": "upload-abc123", "filename": "doc.pdf", "expiresAt": 1234567890 }
+
+2. Then reference the fileId in this tool:
+   { "sessionId": "...", "fileId": "upload-abc123", ... }
+
+METHOD 2 (For small files <100KB only):
+Use base64 content directly:
+{ "file": { "content": "base64...", "filename": "doc.pdf" }, ... }
+
+DO NOT attempt to read local file paths or convert large files to base64 
+in the conversation - this will consume all available context.
+```
+
+### File Upload Endpoint Specification
+
+**Endpoint**: `POST /upload`
+
+**Request**:
+- Content-Type: `multipart/form-data`
+- Field name: `file`
+- Max size: 50MB
+- Allowed types: PDF, DOC, DOCX, PNG, JPG, JPEG (configurable)
+
+**Response** (Success - 200):
+```json
+{
+  "fileId": "a1b2c3d4e5f6...",
+  "filename": "MyBank.pdf",
+  "size": 1638400,
+  "expiresAt": 1234567890000
 }
 ```
 
-### Phase 3: Update Existing Components
+**Response** (Error - 400):
+```json
+{
+  "error": "No file provided" | "File too large" | "Invalid file type"
+}
+```
 
-- [ ] Update `SessionManager.ts`:
-  - [ ] Add `browserToken` and `browserSID` to session storage
-  - [ ] Support 'browser_pending' status
-- [ ] Update `session.types.ts`:
-  - [ ] Add optional `browserToken?: string`
-  - [ ] Add optional `browserSID?: string`
-  - [ ] Add optional `platformUrl?: string`
-- [ ] Keep `api-call.tool.ts` unchanged (already uses `ibSession.sid`)
+**Response** (Error - 500):
+```json
+{
+  "error": "Upload failed"
+}
+```
 
-### Phase 4: Testing & Validation
+### Security Considerations
 
-- [ ] Test browser login flow locally
-  - [ ] Call `browser_login_start` with platformUrl
-  - [ ] Open browser URL and login
-  - [ ] Call `browser_login_complete` 
-  - [ ] Verify session has valid `ibSession` data
-- [ ] Test API calls with browser-authenticated session
-  - [ ] Call `api_call` with sessionId from browser login
-  - [ ] Verify API calls use `sid` correctly
-- [ ] Test session expiry handling
-  - [ ] Verify 401 responses prompt re-authentication
+1. **File Size Limits**: 50MB maximum to prevent abuse
+2. **File Type Validation**: Only allow document types
+3. **Rate Limiting**: Prevent upload spam (to be implemented)
+4. **Temporary Storage**: Files automatically deleted after 5 minutes
+5. **No Persistent Storage**: No long-term file retention
+6. **Unique File IDs**: Cryptographically random (32 bytes hex)
+7. **No Directory Listing**: No way to enumerate uploaded files
+8. **Access Control**: Files accessible only via their unique ID
 
-### Phase 5: Documentation
+### File Cleanup Strategy
 
-- [ ] Create `docs/browser-login-flow.md`
-  - [ ] Document complete flow with examples
-  - [ ] Include sequence diagrams
-  - [ ] Add troubleshooting guide
-- [ ] Update `README.md`
-  - [ ] Add browser_login_start and browser_login_complete tools
-  - [ ] Include usage examples
-  - [ ] Note this as experimental/alternative to OAuth
-- [ ] Update `docs/authentication-architecture.md`
-  - [ ] Add section on browser-based authentication
-  - [ ] Compare OAuth vs browser login approaches
-  - [ ] Document when to use each method
+- **TTL**: 5 minutes from upload time
+- **Automatic Cleanup**: setTimeout triggers file deletion
+- **Cleanup on Use**: File deleted after successful upload to IntelligenceBank
+- **Cleanup on Error**: File remains for TTL (allows retry)
+- **Server Shutdown**: All files cleaned up gracefully
+- **Storage Location**: `/tmp/ib-mcp-uploads/` (auto-cleaned by OS)
 
-## Comparison: OAuth Bridge vs Browser Login
+---
 
-| Aspect | OAuth Bridge (Current) | Browser Login (Proposed) |
-|--------|----------------------|--------------------------|
-| **Complexity** | High (4+ API calls, token exchange) | Low (2 API calls) |
-| **Dependencies** | Requires OAuth bridge AWS Lambda | Direct to IB platform |
-| **Steps** | 5 steps with redirects | 3 steps (start → user login → complete) |
-| **MCP Compliance** | Full OAuth 2.0 compliance | Custom flow (may not be standard) |
-| **Token Management** | OAuth tokens + IB session | IB session only |
-| **User Experience** | Automatic redirect, seamless | Manual step confirmation required |
-| **Maintenance** | Requires OAuth bridge maintenance | No bridge needed |
-| **Session Data** | Dual auth (OAuth + IB) | Single auth (IB only) |
+## Migration Strategy
 
-## Key Differences from OAuth Flow
+### Phase 1: Implementation (This Week)
+- [x] Design solution architecture
+- [x] Implement upload endpoint
+- [x] Update compliance review tool
+- [x] Add security measures
+- [ ] Test end-to-end workflow
+- [ ] Deploy to production
 
-1. **No Redirect Back**: Browser login doesn't redirect back to MCP server
-2. **User Confirmation Required**: User must tell AI when they've completed login
-3. **Direct IB API**: No OAuth bridge intermediary
-4. **Simpler State Management**: No PKCE, no state parameter
-5. **Single Credential Set**: Only IB session, no OAuth tokens
+### Phase 2: Documentation (This Week)
+- [ ] Update README with file upload workflow
+- [ ] Create usage examples for two-step upload
+- [ ] Document limitations and best practices
+- [ ] Update codebase summary
 
-## Advantages of Browser Login
+### Phase 3: Monitoring (Next Week)
+- [ ] Monitor upload endpoint usage
+- [ ] Track file sizes and cleanup
+- [ ] Identify any edge cases
+- [ ] Optimize performance if needed
+- [ ] Gather user feedback
 
-1. **Simplicity**: 2 API calls vs 4+ in OAuth flow
-2. **No Bridge Dependency**: Direct communication with IB platform
-3. **Easier Debugging**: Fewer moving parts
-4. **Transparent**: User sees IB login directly
-5. **Less Code**: Simpler implementation and maintenance
+---
 
-## Potential Concerns
+## Future Considerations
 
-1. **MCP Compliance**: May not follow standard OAuth patterns
-2. **User Experience**: Requires manual confirmation step
-3. **Session Management**: Need to handle session expiry gracefully
-4. **Multi-Platform**: Need to ask for platformUrl if not provided
-5. **Security**: Ensure token is properly secured during the flow
+### When MCP Protocol Supports Binary Resources
 
-## Success Criteria
+Once the MCP protocol adds native support for binary resources (planned feature):
 
-- [ ] User can authenticate without OAuth bridge
-- [ ] Session credentials (`sid`, `clientId`, `apiV3url`) are correctly stored
-- [ ] `api_call` tool works identically with browser-authenticated sessions
-- [ ] Session expiry is handled gracefully (401 → re-authenticate)
-- [ ] Documentation is clear and complete
-- [ ] Code is cleaner and easier to maintain than OAuth flow
+1. Implement MCP resource handler for files
+2. Update tool to accept resource URIs
+3. Deprecate upload endpoint (or keep as fallback)
+4. Update documentation
+5. Maintain backward compatibility
+
+### Potential Enhancements
+
+- File upload progress tracking
+- Support for multiple file uploads in single request
+- File preview/validation before review
+- Integration with cloud storage (S3) for larger files
+- Direct streaming from client to IntelligenceBank (avoiding temporary storage)
+- Caching of uploaded files across multiple reviews
+
+---
 
 ## Next Steps
 
-1. Review this plan with stakeholders
-2. Get approval to proceed with implementation
-3. Create browser login tool implementation
-4. Test thoroughly in development environment
-5. Compare user experience vs OAuth flow
-6. Decide whether to:
-   - Keep both methods (OAuth + browser login)
-   - Replace OAuth with browser login
-   - Use browser login as fallback
+### Completed Actions
+1. ✅ Installed `multer` dependency: `npm install multer @types/multer`
+2. ✅ Created upload handler implementation ([`src/server/upload-handler.ts`](../src/server/upload-handler.ts:1))
+3. ✅ Integrated into Express server setup ([`src/index.ts:109`](../src/index.ts:109))
+4. ✅ Updated compliance review tool to accept `fileId` ([`src/tools/run-file-compliance-review.tool.ts:84`](../src/tools/run-file-compliance-review.tool.ts:84))
+5. ✅ Added automatic file cleanup after successful use
+6. ✅ Updated tool description with upload instructions
 
-## Open Questions
+### Next Actions
+1. Test locally with MCP Inspector
+2. Test file upload workflow end-to-end
+3. Verify file cleanup mechanisms
+4. Deploy to production EC2 instance
+5. Test with Claude desktop in production
 
-1. Should we keep OAuth flow as primary or make browser login the default?
-2. How do we handle platforms that don't support browser login API?
-3. Should we auto-detect which method to use based on platform?
-4. What happens if user closes browser without completing login?
-5. How long should we wait for user to complete browser authentication?
+### Testing Checklist
+- [ ] Upload 100KB file successfully
+- [ ] Upload 1.6MB file successfully
+- [ ] Upload 10MB file successfully
+- [ ] Upload 50MB file successfully
+- [ ] Verify file cleanup after 5 minutes
+- [ ] Test with expired file ID
+- [ ] Test with invalid file ID
+- [ ] Verify no context pollution in Claude conversation
+- [ ] Complete end-to-end compliance review
+- [ ] Test error scenarios
 
-## Implementation Notes
+### Related Documentation
 
-- **Reuse Existing Code**: Leverage `SessionManager`, `AuthSession` structure, `api-call.tool`
-- **No Breaking Changes**: Keep OAuth flow intact, add browser login as alternative
-- **Consistent Interface**: Browser login tools should feel similar to OAuth tools
-- **Clear Naming**: Use `browser_login_*` prefix to distinguish from `auth_*` tools
-- **Progressive Enhancement**: Start simple, add features based on testing
+- **Current Implementation**: [`src/tools/run-file-compliance-review.tool.ts`](../src/tools/run-file-compliance-review.tool.ts:1)
+- **Type Definitions**: [`src/types/compliance-review.types.ts`](../src/types/compliance-review.types.ts:1)
+- **Server Setup**: [`src/server/express-setup.ts`](../src/server/express-setup.ts:1)
+- **Deployment**: [`scripts/deploy.sh`](../scripts/deploy.sh:1)
 
-## Timeline Estimate
+---
 
-- **Phase 1-2** (Implementation): 2-3 hours
-- **Phase 3** (Integration): 1 hour  
-- **Phase 4** (Testing): 2-3 hours
-- **Phase 5** (Documentation): 1-2 hours
-- **Total**: 6-9 hours for complete implementation and testing
+## Previous Task: File Compliance Review Implementation ✅ Completed
 
-## Related Files
+Successfully implemented outcome-based file compliance review tools for the IntelligenceBank API Tools MCP Server.
 
-Key files to modify/create:
-- `src/tools/browser-login.tool.ts` (NEW)
-- `src/types/session.types.ts` (UPDATE)
-- `src/session/SessionManager.ts` (UPDATE - add browser session support)
-- `src/index.ts` (UPDATE - register new tools)
-- `docs/browser-login-flow.md` (NEW)
-- `docs/authentication-architecture.md` (UPDATE)
-- `README.md` (UPDATE)
+### Implemented Features
 
-Existing files to keep unchanged:
-- `src/tools/api-call.tool.ts` (NO CHANGE - already uses ibSession.sid)
-- `src/auth/oauth-callback.ts` (NO CHANGE - OAuth flow remains)
-- `src/tools/auth-login.tool.ts` (NO CHANGE - OAuth flow remains)
-- `src/tools/auth-status.tool.ts` (NO CHANGE - works with both flows)
+#### 1. New MCP Tools
+
+**get_compliance_filters** - Retrieves available category filters from IntelligenceBank API for use in compliance reviews.
+
+**run_file_compliance_review** - Comprehensive outcome-based tool that handles the entire compliance review workflow.
+
+#### 2. MCP Prompt Resource
+
+**compliance_review_help** - Post-login guidance prompt that appears in Claude's interface.
+
+### Deployment Details
+
+- **Production Endpoint:** https://mcp.connectingib.com/mcp
+- **Deployment Date:** October 26, 2025
+- **Status:** Operational but blocked by file handling issue
+
+### Key Design Decisions
+
+1. **Outcome-Based Tool Pattern** - Single tool call for complete workflow
+2. **Enhanced Tool Descriptions** - Detailed response format documentation
+3. **Optional Category Filters** - Flexible categorization support
+4. **Internal Polling** - Transparent status checking
+
+### Testing Status
+
+- ✅ TypeScript compilation successful
+- ✅ Tool registration verified
+- ✅ Deployed to production successfully
+- ⏸️ End-to-end testing blocked by file handling issue
+
+### Documentation
+
+- **Design Pattern:** [`docs/design-options/outcome_tools_guide.md`](design-options/outcome_tools_guide.md:1)
+- **Project Roadmap:** [`docs/projectRoadmap.md`](projectRoadmap.md:1)
+- **Codebase Summary:** [`docs/codebaseSummary.md`](codebaseSummary.md:1)
+- **Tech Stack:** [`docs/techStack.md`](techStack.md:1)

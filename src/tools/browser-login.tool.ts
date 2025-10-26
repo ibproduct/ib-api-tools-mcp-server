@@ -19,7 +19,21 @@ export class BrowserLoginStartTool {
     public readonly definition = {
         name: 'browser_login_start',
         title: 'Start Browser Login',
-        description: 'Initiate direct browser-based authentication with IntelligenceBank. Returns a URL for the user to visit in their browser to log in. This is a simpler alternative to OAuth authentication.',
+        description: `AUTHENTICATION STEP 1 of 2: Initiate browser-based authentication with IntelligenceBank.
+
+WHEN TO USE:
+Call this tool when starting a new session or when user needs to authenticate.
+
+WORKFLOW:
+1. Call this tool with platformUrl → Get browserUrl and sessionId
+2. User visits browserUrl and logs in via browser
+3. Call browser_login_complete with sessionId → Get authenticated session
+4. Use sessionId in subsequent API calls (upload_file, run_file_compliance_review, etc.)
+
+RETURNS:
+- sessionId: Use this in browser_login_complete (step 3) and all subsequent API calls
+- browserUrl: User must visit this URL to log in
+- instructions: What to tell the user`,
         inputSchema: {
             platformUrl: z.string().describe('Your IntelligenceBank platform URL (e.g., https://company.intelligencebank.com)')
         },
@@ -156,7 +170,28 @@ export class BrowserLoginCompleteTool {
     public readonly definition = {
         name: 'browser_login_complete',
         title: 'Complete Browser Login',
-        description: 'Complete the browser-based authentication after the user has logged in through their browser. Retrieves and stores the IntelligenceBank session credentials.',
+        description: `AUTHENTICATION STEP 2 of 2: Complete browser authentication after user logs in.
+
+PREREQUISITE:
+- User must have called browser_login_start and visited the browserUrl
+- User must have completed login in their browser
+
+WORKFLOW:
+1. browser_login_start → Get browserUrl and sessionId
+2. User visits browserUrl and logs in
+3. Call this tool with sessionId (you are here) → Get authentication confirmation
+4. Use same sessionId for all subsequent API calls
+
+RETURNS:
+- status: "completed" when successful
+- authenticated: true/false
+- userInfo: User details and client name
+- sessionExpiry: When session expires (if available)
+
+After successful completion, the sessionId from step 1 is now authenticated and can be used with:
+- get_compliance_filters
+- upload_file
+- run_file_compliance_review`,
         inputSchema: {
             sessionId: z.string().describe('Session ID from browser_login_start')
         },

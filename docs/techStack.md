@@ -112,26 +112,30 @@ See [`docs/authentication-audit.md`](authentication-audit.md) for comprehensive 
 ### Source Code Structure (Modular Architecture)
 ```
 src/
-├── index.ts                 # Main server entry point
-├── types.ts                 # Legacy types (to be removed)
-├── auth/                    # OAuth protocol implementation
-│   ├── oauth-callback.ts    # OAuth callback handler
-│   ├── oauth-utils.ts       # PKCE utilities
-│   ├── token-manager.ts     # Token refresh logic
-│   └── html-pages.ts        # Success/error HTML pages
-├── core/                    # Core infrastructure
-│   └── tool-registry.ts     # Tool registration helper
-├── server/                  # HTTP server setup
-│   └── express-setup.ts     # Express app configuration
-├── session/                 # Session management
-│   └── SessionManager.ts    # Auth session lifecycle
-├── tools/                   # MCP tool implementations
-│   ├── auth-login.tool.ts   # Start OAuth flow
-│   ├── auth-status.tool.ts  # Check auth status
-│   ├── api-call.tool.ts     # Make authenticated API calls
-│   └── status.ts            # Legacy status tool
-└── types/                   # Type definitions
-    └── session.types.ts     # AuthSession interface
+├── index.ts                             # Main server entry point
+├── types.ts                             # Legacy types (to be removed)
+├── auth/                                # OAuth protocol implementation
+│   ├── oauth-callback.ts                # OAuth callback handler
+│   ├── oauth-utils.ts                   # PKCE utilities
+│   ├── token-manager.ts                 # Token refresh logic
+│   └── html-pages.ts                    # Success/error HTML pages
+├── core/                                # Core infrastructure
+│   └── tool-registry.ts                 # Tool registration helper
+├── server/                              # HTTP server setup
+│   └── express-setup.ts                 # Express app configuration
+├── session/                             # Session management
+│   └── SessionManager.ts                # Auth session lifecycle
+├── tools/                               # MCP tool implementations
+│   ├── auth-login.tool.ts               # Start OAuth flow
+│   ├── auth-status.tool.ts              # Check auth status
+│   ├── api-call.tool.ts                 # Make authenticated API calls
+│   ├── browser-login.tool.ts            # Browser-based direct login
+│   ├── get-compliance-filters.tool.ts   # Get category filters
+│   ├── run-file-compliance-review.tool.ts # File compliance review
+│   └── status.ts                        # Legacy status tool
+└── types/                               # Type definitions
+    ├── session.types.ts                 # AuthSession interface
+    └── compliance-review.types.ts       # Compliance review types
 ```
 
 ### Documentation
@@ -216,17 +220,24 @@ docs/
 
 ### Integration Testing
 - **OAuth Flow**: End-to-end authentication testing
+- **Browser Login Flow**: Alternative authentication method
 - **Token Management**: Refresh and expiry handling
 - **API Proxy**: Verify proxied IntelligenceBank API calls
+- **Compliance Review**: Complete workflow testing
 - **Error Handling**: Test failure scenarios
 
 ### Production Testing
 - **MCP Protocol**: Initialize and tools/list verified ✓
 - **HTTPS Endpoint**: curl POST to https://mcp.connectingib.com/mcp ✓
 - **SSL Certificate**: Let's Encrypt verified ✓
-- **Tools Available**: auth_login, auth_exchange, auth_status ✓
+- **Tools Available**: 6 tools operational ✓
+  - auth_login, auth_status
+  - browser_login_start, browser_login_complete
+  - api_call
+  - get_compliance_filters, run_file_compliance_review
+- **MCP Prompts**: compliance_review_help available ✓
 - **Claude Desktop**: Configuration in mcp_settings_production.json
-- **Next**: End-to-end OAuth flow testing, Claude desktop integration
+- **Next**: End-to-end compliance review workflow testing
 
 ### Production Testing (Future)
 - **Performance**: Load and response time benchmarking
@@ -249,11 +260,13 @@ docs/
 ## Future Enhancements
 
 ### Planned Improvements
-- Additional IntelligenceBank API tools (resources, search, workflows)
-- Token refresh automation
-- Enhanced error handling and retry logic
-- Comprehensive logging and monitoring
-- Rate limiting and quota management
+- [x] File compliance review tools (Completed October 2025)
+- [ ] URL-based compliance review tools
+- [ ] Additional IntelligenceBank API tools (resources, search, workflows)
+- [ ] Token refresh automation
+- [ ] Enhanced error handling and retry logic
+- [ ] Comprehensive logging and monitoring
+- [ ] Rate limiting and quota management
 
 ### Potential Additions
 - Automated testing suite (unit, integration, e2e)

@@ -28,16 +28,20 @@
 │   ├── core/                    # Core infrastructure
 │   │   └── tool-registry.ts     # Tool registration helper
 │   ├── server/                  # HTTP server setup
-│   │   └── express-setup.ts     # Express app configuration
+│   │   ├── express-setup.ts     # Express app configuration
+│   │   └── upload-handler.ts    # File upload endpoint (NEW)
 │   ├── session/                 # Session management
 │   │   └── SessionManager.ts    # Auth session lifecycle
 │   ├── tools/                   # MCP tool implementations
 │   │   ├── auth-login.tool.ts   # Start OAuth flow
 │   │   ├── auth-status.tool.ts  # Check auth status
 │   │   ├── api-call.tool.ts     # Make authenticated API calls
+│   │   ├── get-compliance-filters.tool.ts  # Fetch category filters
+│   │   ├── run-file-compliance-review.tool.ts  # Complete compliance review workflow
 │   │   └── status.ts            # Legacy status tool
 │   └── types/                   # Type definitions
-│       └── session.types.ts     # AuthSession interface
+│       ├── session.types.ts     # AuthSession interface
+│       └── compliance-review.types.ts  # Compliance review types
 ├── .env.example                 # Environment variable template
 ├── biome.json                   # Code formatting/linting config
 ├── package.json                 # Dependencies and scripts
@@ -77,9 +81,13 @@
 Application entry point that orchestrates all components:
 - Initializes SessionManager for auth session tracking
 - Creates OAuthCallbackHandler for token exchange
-- Registers MCP tools (auth_login, auth_status, api_call)
-- Sets up Express routes (/callback, /mcp)
-- Handles graceful shutdown
+- Registers MCP tools:
+  - Authentication: auth_login, auth_status, api_call
+  - Compliance: get_compliance_filters, run_file_compliance_review
+- Registers MCP prompts: compliance_review_help
+- Sets up Express routes (/callback, /mcp, /upload)
+- Configures file upload endpoint for remote file handling
+- Handles graceful shutdown with file cleanup
 
 ### Session Management (src/session/SessionManager.ts)
 Manages authentication session lifecycle:
@@ -181,6 +189,56 @@ MCP tool to make authenticated IntelligenceBank API calls.
 - Handles 401 by marking session as expired
 - Prompts user to re-authenticate via auth_login
 
+#### 4. get_compliance_filters.tool.ts
+MCP tool to retrieve available category filters for compliance reviews.
+
+**Input:**
+- `sessionId`: Session ID from successful authentication
+
+**Output:**
+- `filters`: Array of category filters with names, values, and UUIDs
+
+**Flow:**
+1. Retrieve session and validate authentication
+2. Fetch filters from IntelligenceBank API
+3. Filter for auto-review enabled filters
+4. Return formatted list of categories and values
+
+#### 5. run_file_compliance_review.tool.ts
+MCP tool to run complete file compliance review workflow.
+
+**Input:**
+- `sessionId`: Session ID from successful authentication
+- `file`: Supports multiple formats:
+  - **fileId** (recommended): `{ "fileId": "upload-abc123" }` - Reference to uploaded file
+  - File path (legacy): `"/path/to/file.pdf"` or `{ "path": "/path/to/file.pdf" }`
+  - Base64 content (discouraged): `{ "content": "base64...", "filename": "doc.pdf" }`
+- `categorization` (optional): Array of category filters to apply
+- `maxWaitTime` (optional): Maximum wait time (default 300s)
+- `pollInterval` (optional): Poll interval (default 5s)
+
+**Output:**
+- `reviewId`: Unique review identifier
+- `status`: "completed" or "error"
+- `summary`: Statistics on issues found
+- `comments`: Detailed array of compliance findings
+
+**Flow (with fileId):**
+1. Retrieve uploaded file from temporary storage
+2. Upload file to IntelligenceBank (multipart/form-data)
+3. Create compliance review with file hash and categorization
+4. Poll review status every 5 seconds until completed
+5. Cleanup temporary file
+6. Format and return results with summary statistics
+
+**Key Features:**
+- **NEW**: Accepts fileId from /upload endpoint for remote deployments
+- Supports legacy file path and base64 content (with warnings)
+- Internal polling (no manual orchestration needed)
+- Automatic file cleanup after successful upload
+- Formatted results with page locations
+- Summary statistics by rule and page
+
 ### Type Definitions (src/types/)
 
 #### session.types.ts
@@ -241,6 +299,42 @@ On 401 Error:
 8. User must call auth_login again
 ```
 
+### Compliance Review Flow (With File Upload)
+
+```
+1. Client → MCP Server: Upload file to /upload endpoint
+2. MCP Server: Save to /tmp/ib-mcp-uploads/ with unique ID
+3. MCP Server: Schedule automatic cleanup (5-minute TTL)
+4. MCP Server → Client: Return fileId and expiry time
+5. Client → MCP Server: run_file_compliance_review with fileId
+6. MCP Server: Retrieve file from temporary storage
+7. MCP Server: Retrieve session.ibSession credentials
+8. MCP Server → IB API: Upload file (multipart/form-data)
+9. IB API → MCP Server: Return file hash (_id)
+10. MCP Server: Cleanup temporary file
+11. MCP Server → IB API: Create compliance review with categorization
+12. IB API → MCP Server: Return review ID
+13. MCP Server: Start internal polling loop
+14. MCP Server → IB API: Check review status (every 5s)
+15. IB API → MCP Server: Return status (pending/completed)
+16. MCP Server: Continue polling until completed or timeout
+17. MCP Server → IB API: Fetch final results with comments
+18. MCP Server: Format results with summary statistics
+19. MCP Server → Client: Return formatted compliance report
+```
+
+### Legacy Compliance Review Flow (File Path)
+
+For local deployments or when file path is accessible:
+
+```
+1. Client → MCP Server: run_file_compliance_review with file path
+2. MCP Server: Read file from local filesystem
+3. MCP Server: Retrieve session.ibSession credentials
+4. MCP Server → IB API: Upload file (multipart/form-data)
+5. [Continue from step 9 in the upload flow above]
+```
+
 ## External Dependencies
 
 ### OAuth Bridge Service
@@ -259,11 +353,13 @@ On 401 Error:
 - **Platform-Specific**: Each customer has unique instance URL
 
 ### npm Packages
-- **@modelcontextprotocol/sdk**: MCP protocol implementation
-- **express**: HTTP server framework
+- **@modelcontextprotocol/sdk**: MCP protocol implementation (v1.20.1)
+- **express**: HTTP server framework (v4.21.2)
 - **cors**: CORS middleware
 - **dotenv**: Environment variable management
-- **TypeScript**: Type safety and compilation
+- **form-data**: File upload support for compliance reviews
+- **multer**: Multipart form data handling for file uploads (NEW)
+- **TypeScript**: Type safety and compilation (v5.3.3)
 
 ## Configuration Management
 
@@ -294,6 +390,15 @@ On 401 Error:
 
 ## Recent Changes
 
+### January 2025 - File Upload Architecture
+- **New Endpoint**: POST /upload for multipart file uploads
+- **New Module**: src/server/upload-handler.ts for file management
+- **Updated Tool**: run_file_compliance_review now accepts fileId parameter
+- **Dependencies**: Added multer and @types/multer for file handling
+- **Security**: File type validation, size limits, and TTL-based cleanup
+- **Architecture**: Two-step workflow for remote file handling
+- **Status**: Implementation complete, ready for testing
+
 ### January 2025 - Production Deployment
 - **MCP SDK**: Updated from v1.11.0 to v1.20.1
 - **Architecture**: Removed Cloudflare Workers, implemented HTTP transport
@@ -314,6 +419,18 @@ On 401 Error:
 - **PM2**: Running ib-mcp-server process
 - **SSL**: Let's Encrypt (expires 2026-01-17, auto-renewal enabled)
 - **Verified**: MCP protocol initialize ✓, Tools list ✓, HTTPS ✓
+
+## MCP Prompts
+
+### compliance_review_help
+Post-login guidance prompt that provides step-by-step instructions for running file compliance reviews.
+
+**Available After**: Successful authentication
+**Purpose**: Guide users through compliance review workflow
+**Instructions Include**:
+1. Optional step to check available category filters
+2. Running a file compliance review with categorization
+3. Understanding the formatted results
 
 ## Development Workflow
 
@@ -369,10 +486,12 @@ On 401 Error:
 
 ### Planned Features
 - Additional IB API tools (resources, search, workflows)
+- Text compliance review (similar to file review but for raw text)
 - Automatic token refresh logic
 - Enhanced error handling and retry mechanisms
 - Comprehensive logging and monitoring
 - Rate limiting and quota management
+- Compliance review result caching
 
 ### Infrastructure Improvements
 - Docker containerization
@@ -388,6 +507,24 @@ Currently in initial deployment phase. User feedback will drive:
 - UX improvements for authentication flow
 - Performance optimizations
 - Feature requests and enhancements
+
+## Recent Feature Additions
+
+### January 2025 - File Upload Support
+- **New Endpoint**: POST /upload for remote file handling
+- **New Module**: upload-handler.ts for temporary file storage
+- **Updated Tool**: run_file_compliance_review accepts fileId parameter
+- **Dependencies**: Added multer for multipart uploads
+- **Architecture**: Two-step workflow (upload → review)
+- **Security**: File validation, size limits, automatic cleanup
+
+### January 2025 - Compliance Review Tools
+- **New Tools**: `get_compliance_filters`, `run_file_compliance_review`
+- **New Types**: Comprehensive compliance review type definitions
+- **New Prompt**: Post-login compliance review guidance
+- **Dependencies**: Added `form-data` for file upload support
+- **Architecture**: Outcome-based tool pattern with internal polling
+- **User Experience**: Single-tool workflow for complete compliance reviews
 
 ## Support and Documentation
 

@@ -62,7 +62,9 @@ For production deployment, use: `https://mcp.connectingib.com/mcp`
 
 ## Available Tools
 
-### auth_login
+### Authentication Tools
+
+#### auth_login
 
 Initiates the OAuth 2.0 authentication flow with automatic token exchange.
 
@@ -109,7 +111,7 @@ use_mcp_tool ib-api-tools auth_status { "sessionId": "session-id-from-login" }
 use_mcp_tool ib-api-tools auth_status { "accessToken": "your-access-token" }
 ```
 
-### api_call
+#### api_call
 
 Makes authenticated API calls to IntelligenceBank using direct API access.
 
@@ -140,7 +142,92 @@ use_mcp_tool ib-api-tools api_call {
 }
 ```
 
-### auth_exchange (DEPRECATED)
+### Compliance Review Tools
+
+#### get_compliance_filters
+
+Retrieves available category filters for compliance reviews.
+
+**Input:**
+- `sessionId`: Session ID from successful authentication
+
+**Output:**
+- `filters`: Array of available category filters with:
+  - `name`: Filter name (e.g., "Channel", "Market", "Region")
+  - `values`: Array of selectable filter values
+  - `uuid`: Unique identifier for each value
+
+**Example:**
+```typescript
+use_mcp_tool ib-api-tools get_compliance_filters {
+  "sessionId": "your-session-id"
+}
+```
+
+#### run_file_compliance_review
+
+Runs a complete file compliance review workflow with automatic polling.
+
+**Input:**
+- `sessionId`: Session ID from successful authentication
+- `file`: File to review (supports multiple formats):
+  - String path: `"/path/to/file.pdf"`
+  - Object with path: `{ "path": "/path/to/file.pdf" }`
+  - Object with base64: `{ "filename": "doc.pdf", "content": "base64..." }`
+- `categorization` (optional): Array of category filters to apply:
+  ```json
+  [
+    {
+      "categoryName": "Channel",
+      "selectedOptions": ["Digital", "Print"]
+    }
+  ]
+  ```
+- `pollTimeout` (optional): Maximum time to wait for review completion in seconds (default: 300)
+- `pollInterval` (optional): Time between status checks in seconds (default: 5)
+
+**Output:**
+- `reviewId`: Unique identifier for the review
+- `status`: Review status ("completed" or "error")
+- `summary`: Overview of findings:
+  - `totalIssues`: Total number of compliance issues found
+  - `issuesByRule`: Breakdown by rule type
+  - `issuesByPage`: Breakdown by page number
+- `issues`: Array of detailed compliance findings with:
+  - `term`: Text that triggered the issue
+  - `explanation`: Description of the compliance concern
+  - `sentence`: Full sentence containing the issue
+  - `ruleName`: Internal rule identifier
+  - `ruleDescription`: User-friendly rule name
+  - `page`: Page number where issue was found
+  - `feedback` (optional): Additional guidance
+
+**Features:**
+- Uploads file to IntelligenceBank
+- Creates compliance review with optional categorization
+- Automatically polls for completion (typically 2-3 minutes)
+- Returns formatted, user-friendly results
+- Supports PDF and other document formats
+
+**Example:**
+```typescript
+use_mcp_tool ib-api-tools run_file_compliance_review {
+  "sessionId": "your-session-id",
+  "file": "/path/to/document.pdf",
+  "categorization": [
+    {
+      "categoryName": "Channel",
+      "selectedOptions": ["Digital"]
+    },
+    {
+      "categoryName": "Market",
+      "selectedOptions": ["APAC"]
+    }
+  ]
+}
+```
+
+#### auth_exchange (DEPRECATED)
 
 This tool is deprecated. The `/callback` endpoint now handles token exchange automatically. Use `auth_login` and `auth_status` instead.
 
@@ -180,6 +267,16 @@ The OAuth flow is now fully automatic with session-based tracking:
 - Automatic cleanup of expired sessions runs every minute
 - Tokens refresh automatically on 401 errors during API calls
 - Re-authentication required only when session or refresh token expires
+
+## Available Prompts
+
+### compliance_review_help
+
+Post-login guidance prompt that helps users run file compliance reviews. This prompt appears after successful authentication and provides step-by-step instructions for:
+
+1. Optionally checking available category filters
+2. Running a file compliance review
+3. Understanding the review results
 
 ## Environment Variables
 
