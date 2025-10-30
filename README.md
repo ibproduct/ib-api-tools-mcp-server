@@ -60,6 +60,44 @@ Add to your Claude desktop config:
 
 For production deployment, use: `https://mcp.connectingib.com/mcp`
 
+## MCP Resources
+
+The server provides browsable IntelligenceBank resources through the MCP Resources protocol, allowing Claude to explore folders and files directly.
+
+### Resource URI Scheme
+
+Resources use the custom URI scheme: `ib://{clientid}/{type}/{id}`
+
+**Resource Types:**
+- `folder` - Access folder metadata and subfolders
+- `resource` - Access detailed file metadata
+- `folder-resources` - List all files within a folder
+- `search` - Search across resources
+
+**Examples:**
+```
+ib://BnK4JV/folder/123           # Folder details
+ib://BnK4JV/resource/456         # File details
+ib://BnK4JV/folder-resources/123 # Files in folder
+ib://BnK4JV/search/query         # Search results
+```
+
+### Usage in Claude
+
+After authentication, you can attach IntelligenceBank resources to conversations:
+
+1. Click the attachment icon in Claude
+2. Select "Choose from resources"
+3. Browse IntelligenceBank folders and files
+4. Attach resources for context in your conversation
+
+Resources provide metadata including:
+- Folder structure and hierarchy
+- File names, types, and sizes
+- Creation and modification dates
+- Access permissions
+- Custom metadata fields
+
 ## Available Tools
 
 ### Authentication Tools

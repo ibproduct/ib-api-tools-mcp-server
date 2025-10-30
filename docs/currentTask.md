@@ -1,422 +1,565 @@
-# Current Task: File Handling Architecture for Remote MCP Server
+# Current Task
 
-## Status: ✅ Implementation Complete - Ready for Testing
+## OAuth Flow at Connector Level - WORKING ✅
 
-## Overview
+### Status: Complete ✅ - Authentication Now Working!
 
-Addressing a critical file handling issue discovered during production testing of the compliance review tools. The current implementation fails when users upload files to Claude's interface due to a fundamental architecture mismatch between local and remote MCP servers.
+**Major Achievement:** Claude Desktop can now successfully authenticate via OAuth flow when adding the connector!
 
----
+### What Was Fixed
 
-## Problem Statement
+The OAuth bridge's `mcp-public-client` configuration was updated to allow Claude Desktop's callback URLs:
+- `https://claude.ai/api/mcp/auth_callback` (current)
+- `https://claude.com/api/mcp/auth_callback` (future)
 
-### Critical Issue Discovered
+This enables Claude Desktop to complete the OAuth flow automatically when users add the connector.
 
-The compliance review tool fails when used with Claude's file upload feature, causing conversations to become unusable.
+### How It Works Now
 
-#### Current Problematic Flow
+1. User adds connector in Claude Desktop: `https://mcp.connectingib.com/mcp`
+2. User provides `client_id: mcp-public-client` in connector settings
+3. User clicks "Connect" button
+4. Claude Desktop automatically:
+   - Discovers OAuth endpoints via `.well-known` URIs
+   - Initiates OAuth flow at OAuth bridge
+   - Opens authentication in browser
+   - Completes token exchange
+   - Stores Bearer token for API calls
 
-1. User uploads a file (e.g., 1.6MB PDF) to Claude's interface
-2. Claude provides a local file path: `/mnt/user-data/uploads/[AU]_MyBank.pdf`
-3. User requests: "Please run a review for this file"
-4. Claude calls our MCP tool [`run_file_compliance_review`](../src/tools/run-file-compliance-review.tool.ts:1) with the file path
-5. **Problem**: Our remote EC2 server cannot access Claude's local filesystem at `/mnt/user-data/uploads/`
-6. File upload to IntelligenceBank fails with `400 Bad Request`
-7. **Critical Issue**: Claude attempts to recover by reading the file and converting it to base64 within the conversation
-8. The base64 output (~2.1MB for a 1.6MB file) appears in the conversation history
-9. This consumes ALL available context tokens, killing the conversation
+**Result:** Connector shows "Connected" status with no manual intervention needed!
 
-#### Impact
-
-- Conversations become unusable after attempting to process files
-- Cannot complete compliance review workflows with uploaded files
-- Severe user experience degradation
-- Expected file sizes: 1.6MB typical, up to 50MB possible
-
-### Root Cause Analysis
-
-#### Architecture Mismatch
-
-The issue stems from a fundamental mismatch between:
-- **Local MCP Servers**: Can access files via filesystem paths
-- **Remote MCP Servers** (our deployment): Cannot access client's local filesystem
-
-Our current tool implementation accepts file paths as input ([`run-file-compliance-review.tool.ts:79-88`](../src/tools/run-file-compliance-review.tool.ts:79-88)), which works for local deployments but fails for remote deployments.
-
-#### Why Base64 Conversion Fails
-
-While our tool schema supports base64 content as an alternative, Claude (the LLM) currently:
-1. First attempts to use the file path directly (fails on remote server)
-2. Then converts the file to base64 within the conversation context (consumes all tokens)
-3. The base64 string appears in conversation history, polluting context
-
-For a 1.6MB file:
-- Original size: 1.6MB
-- Base64 encoded: ~2.1MB of text
-- Token count: ~560,000 tokens (well beyond most context limits)
+### Documentation Updated
+- [`docs/oauth-discovery-analysis.md`](oauth-discovery-analysis.md) - Complete analysis with solution
+- [`docs/mcp-oauth-bridge-integration.md`](mcp-oauth-bridge-integration.md) - Updated with callback URLs
 
 ---
 
-## Solution Options Analysis
+## Current Task: Resources List Debugging - Debug Logging Added ✅
 
-### Option 1: MCP Resources with Blob Support ❌ Not Currently Feasible
+### Objective
+Investigate why resources don't appear when clicking "Add from IntelligenceBank" after successful authentication.
 
-Leverage the MCP protocol's resource system to handle binary data efficiently.
+### Status: Debug Logging Deployed - Ready for Testing
 
-**Concept**:
-```typescript
-// Tool accepts resource URI instead of file content
-{ file: "resource://claude-files/[AU]_MyBank.pdf" }
+### What Was Completed ✅
 
-// MCP server requests the resource from Claude
-const fileContent = await client.readResource("resource://claude-files/[AU]_MyBank.pdf");
-```
-
-**Advantages**:
-- No base64 encoding in conversation context
-- Efficient binary data transfer
-- Follows MCP protocol standards
-- Clean separation of concerns
-
-**Disadvantages**:
-- Requires MCP SDK and Claude to implement resource blob support
-- Not currently available in MCP v1.20.1
-- Would require waiting for protocol enhancement
-
-**Status**: Not currently feasible - requires upstream protocol changes
-
----
-
-### Option 2: Multipart Upload Endpoint ✅ Recommended
-
-Add a dedicated file upload endpoint to our MCP server that accepts multipart/form-data, separate from the MCP tool protocol.
-
-**Architecture**:
-```
-POST /upload (multipart/form-data)
-  ↓
-Server stores file temporarily with unique ID
-  ↓
-Returns: { fileId: "upload-abc123", filename: "doc.pdf", expiresAt: timestamp }
-  ↓
-run_file_compliance_review({ fileId: "upload-abc123", ... })
-  ↓
-Server retrieves file from temp storage
-  ↓
-Upload to IntelligenceBank
-  ↓
-Cleanup temp file
-```
-
-**Advantages**:
-- ✅ Immediate implementation with existing technology
-- ✅ No conversation context pollution
-- ✅ Supports large files (up to 50MB+)
-- ✅ Clean separation: upload ≠ processing
-- ✅ Automatic cleanup of temporary files
-- ✅ Works with current MCP protocol
-
-**Disadvantages**:
-- Requires two-step user flow (upload, then review)
-- Adds complexity to tool usage
-- Requires Claude to learn the two-step process
-- File storage management needed
-
-**Implementation Complexity**: Medium (1-2 days)
-
-**Key Components**:
-1. New endpoint: `POST /upload` with multer middleware
-2. Temporary file storage: `/tmp/ib-mcp-uploads/`
-3. File ID generation: Cryptographically random
-4. Automatic cleanup: 5-minute TTL
-5. Modified tool: Accept `fileId` OR base64 content
-
----
-
-### Option 3: Streaming Multipart in Tool ❌ Doesn't Solve Core Issue
-
-Accept base64 content in the tool but process it as a stream to avoid loading into memory.
-
-**Status**: Not recommended - doesn't solve the core issue of context consumption. The base64 data would still appear in conversation history.
-
----
-
-### Option 4: File Proxy Service ❌ Over-engineered
-
-Create a separate file proxy service that Claude can access.
-
-**Status**: Not recommended - too complex for current needs. Requires additional infrastructure and security considerations.
-
----
-
-## Recommended Solution: Option 2 - Multipart Upload Endpoint
-
-### Implementation Plan
-
-**Phase 1: Add Upload Endpoint** (Day 1, 4 hours)
-1. Install dependencies: `multer` for file upload handling
-2. Create [`src/server/upload-handler.ts`](../src/server/upload-handler.ts:1)
-3. Add `/upload` endpoint to Express server
-4. Implement temporary file storage in `/tmp/ib-mcp-uploads/`
-5. Implement file cleanup mechanism (5-minute TTL)
-6. Add security measures:
-   - File size limits (50MB max)
-   - File type validation
-   - Rate limiting
-   - Unique, non-guessable file IDs
-
-**Phase 2: Modify Compliance Review Tool** (Day 1, 3 hours)
-1. Update tool input schema to accept `fileId` OR base64 content
-2. Modify [`getFileInfo()`](../src/tools/run-file-compliance-review.tool.ts:299) to handle file ID lookups
-3. Update tool description with upload instructions
-4. Add file cleanup after successful upload to IntelligenceBank
-5. Maintain backward compatibility with base64 input (for small files)
-
-**Phase 3: Documentation and Testing** (Day 2, 4 hours)
-1. Update [`README.md`](../README.md:1) with two-step workflow
-2. Update tool descriptions with clear instructions
-3. Add error handling for missing/expired files
-4. Test with various file sizes (100KB, 1.6MB, 10MB, 50MB)
-5. Document limitations and best practices
-6. Update [`docs/codebaseSummary.md`](codebaseSummary.md:1)
-
-### Updated Tool Interface
-
-```typescript
-// Option A: Upload first, then reference (Recommended for files >100KB)
-const uploadResponse = await fetch('https://mcp.connectingib.com/upload', {
-  method: 'POST',
-  body: formData  // File from Claude's upload
-});
-const { fileId } = await uploadResponse.json();
-
-// Then use in tool
-run_file_compliance_review({
-  sessionId: "session-id",
-  fileId: fileId,  // Reference to uploaded file
-  categorization: [...]
-});
-
-// Option B: Direct base64 (Backward compatibility for small files <100KB)
-run_file_compliance_review({
-  sessionId: "session-id",
-  file: {
-    content: "base64...",
-    filename: "doc.pdf"
-  },
-  categorization: [...]
-});
-```
-
-### Updated Tool Description
-
-The tool description will be updated to include:
-
-```
-IMPORTANT - FILE UPLOAD FOR REMOTE SERVER:
-
-This MCP server runs remotely and cannot access local file paths. 
-Use one of these methods:
-
-METHOD 1 (Recommended for files >100KB):
-1. First upload the file to our server:
-   POST https://mcp.connectingib.com/upload
-   Content-Type: multipart/form-data
+1. **Added Comprehensive Debug Logging** (Build successful)
+   - [`src/resources/resource-handlers.ts`](../src/resources/resource-handlers.ts):
+     - Logs when `handleResourceList()` is called
+     - Logs session lookup results
+     - Logs API request parameters
+     - Logs API response statistics
+     - Logs final return value
    
-   Response: { "fileId": "upload-abc123", "filename": "doc.pdf", "expiresAt": 1234567890 }
+   - [`src/auth/mcp-auth-middleware.ts`](../src/auth/mcp-auth-middleware.ts):
+     - Logs session creation flow
+     - Logs /userinfo endpoint calls
+     - Logs Bearer token validation
+     - Logs when sessions are created from tokens
+   
+   - [`src/index.ts`](../src/index.ts):
+     - Logs all MCP endpoint requests
+     - Logs authentication status for each request
 
-2. Then reference the fileId in this tool:
-   { "sessionId": "...", "fileId": "upload-abc123", ... }
+2. **Build Status**: ✅ Successful
+   - TypeScript compilation completed
+   - All modules compiled without errors
+   - Ready for deployment
 
-METHOD 2 (For small files <100KB only):
-Use base64 content directly:
-{ "file": { "content": "base64...", "filename": "doc.pdf" }, ... }
+### Debug Logging Details
 
-DO NOT attempt to read local file paths or convert large files to base64 
-in the conversation - this will consume all available context.
+**Resource Handler Logging:**
+```typescript
+[handleResourceList] Request received: { hasAuthHeader, sessionId, cursor }
+[handleResourceList] Session lookup result: { sessionFound, hasIBSession, hasSid }
+[handleResourceList] Using credentials: { clientId, sidPreview, apiV3url }
+[handleResourceList] Query parameters: { offset, keywords, limit }
+[handleResourceList] Fetching resources from IB API...
+[handleResourceList] API response received: { totalCount, rowsReturned, hasMore }
+[handleResourceList] Returning response: { resourceCount, hasNextCursor }
 ```
 
-### File Upload Endpoint Specification
+**Auth Middleware Logging:**
+```typescript
+[mcpAuthMiddleware] Processing request: { method, hasAuth }
+[mcpAuthMiddleware] Resource request detected, ensuring session exists
+[mcpAuthMiddleware] Session ready: { sessionId, hasSid }
+[findOrCreateSessionFromToken] Starting session lookup/creation
+[findOrCreateSessionFromToken] Found existing session / No existing session
+[findOrCreateSessionFromToken] Created new session from Bearer token
+```
 
-**Endpoint**: `POST /upload`
+**Main Endpoint Logging:**
+```typescript
+[handleMcpEndpoint] Request received: { method, id, hasAuthHeader, hasToken }
+```
 
-**Request**:
-- Content-Type: `multipart/form-data`
-- Field name: `file`
-- Max size: 50MB
-- Allowed types: PDF, DOC, DOCX, PNG, JPG, JPEG (configurable)
+### Next Steps for Testing
 
-**Response** (Success - 200):
-```json
-{
-  "fileId": "a1b2c3d4e5f6...",
-  "filename": "MyBank.pdf",
-  "size": 1638400,
-  "expiresAt": 1234567890000
+1. **Deploy to Production**:
+   ```bash
+   ./scripts/deploy.sh
+   ```
+
+2. **Test in Claude Desktop**:
+   - Add IntelligenceBank connector (or use existing)
+   - Click "Add from IntelligenceBank"
+   - Monitor production logs for debug output
+
+3. **Collect Production Logs**:
+   ```bash
+   ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47
+   pm2 logs ib-mcp-server --lines 200
+   ```
+
+4. **Analyze Logs** to identify:
+   - Are `resources/list` requests being received?
+   - Is Authorization header present?
+   - Is session lookup successful?
+   - Is API call succeeding?
+   - What response is being returned?
+
+### Known Facts
+✅ OAuth authentication working at connector level
+✅ Bearer token being stored by Claude Desktop
+✅ Server receiving authenticated requests
+✅ Debug logging added to all critical points
+❌ Resources list not appearing in Claude UI (to be investigated with logs)
+
+### Expected Log Flow for Successful Resources List
+
+```
+[handleMcpEndpoint] Request received: { method: 'resources/list', hasAuthHeader: true, hasToken: true }
+[mcpAuthMiddleware] Processing request: { method: 'resources/list', hasAuth: true }
+[mcpAuthMiddleware] Resource request detected, ensuring session exists
+[findOrCreateSessionFromToken] Starting session lookup/creation
+[findOrCreateSessionFromToken] Found existing session: session-xxx
+[mcpAuthMiddleware] Session ready: { sessionId: 'session-xxx', hasSid: true }
+[handleResourceList] Request received: { hasAuthHeader: true, sessionId: '', cursor: undefined }
+[handleResourceList] Session lookup result: { sessionFound: true, hasIBSession: true, hasSid: true }
+[handleResourceList] Using credentials: { clientId: 'BnK4JV', sidPreview: 'abc123...', apiV3url: '...' }
+[handleResourceList] Query parameters: { offset: 0, keywords: '', limit: 100 }
+[handleResourceList] Fetching resources from IB API...
+[handleResourceList] API response received: { totalCount: 1234, rowsReturned: 100, hasMore: true }
+[handleResourceList] Returning response: { resourceCount: 100, hasNextCursor: true }
+```
+
+### Potential Issues to Look For
+
+1. **Session Not Created**: If logs show session creation fails
+2. **API Call Fails**: If IB API returns error
+3. **Empty Response**: If API returns 0 resources
+4. **Token Validation Fails**: If Bearer token is rejected
+5. **Response Format Issue**: If MCP doesn't accept the response structure
+
+---
+
+## Previous Task: MCP OAuth Automatic Flow Implementation ✅
+
+### Objective
+Implement HTTP 401 Unauthorized responses with WWW-Authenticate headers to enable automatic OAuth flow initiation in Claude Desktop and other MCP clients.
+
+### Status: Complete ✅ - Deployed and Working
+
+### Problem Identified
+When users added the IntelligenceBank connector in Claude, no authentication prompt appeared because our server never returned HTTP 401 Unauthorized responses. This prevented Claude from discovering that authentication was required and initiating the automatic OAuth flow.
+
+### Solution Implemented
+Added proper HTTP 401 responses with WWW-Authenticate headers containing OAuth discovery metadata, enabling automatic OAuth flow as specified in the MCP Authorization protocol.
+
+## Implementation Details
+
+### Changes Made
+
+#### 1. Updated WWW-Authenticate Header Builder
+**File:** `src/auth/mcp-authorization.ts`
+
+Added `resource_metadata` parameter to the WWW-Authenticate header builder:
+```typescript
+export function buildWWWAuthenticateHeader(params: {
+    realm: string;
+    scope?: string;
+    error?: string;
+    errorDescription?: string;
+    resource_metadata?: string;  // NEW: Critical for OAuth discovery
+}): string {
+    const parts: string[] = [`Bearer realm="${params.realm}"`];
+    
+    if (params.resource_metadata) {
+        parts.push(`resource_metadata="${params.resource_metadata}"`);
+    }
+    // ... rest of implementation
 }
 ```
 
-**Response** (Error - 400):
-```json
-{
-  "error": "No file provided" | "File too large" | "Invalid file type"
+#### 2. Exported Session Creation Function
+**File:** `src/auth/mcp-auth-middleware.ts`
+
+Exported `findOrCreateSessionFromToken()` function for use in main handler:
+```typescript
+export async function findOrCreateSessionFromToken(
+    sessionManager: SessionManager,
+    authHeader: string | undefined
+): Promise<AuthSession | null>
+```
+
+#### 3. Added Authentication Check Helper
+**File:** `src/index.ts`
+
+Created helper function to determine which requests require authentication:
+```typescript
+function shouldRequireAuth(body: any): boolean {
+    if (!body || !body.method) {
+        return false;
+    }
+    
+    const method = body.method;
+    
+    // Allow initialize and initialized without auth for capability discovery
+    if (method === 'initialize' || method === 'initialized') {
+        return false;
+    }
+    
+    // All other methods require authentication
+    return true;
 }
 ```
 
-**Response** (Error - 500):
-```json
+#### 4. Implemented 401 Response Logic
+**File:** `src/index.ts`
+
+Updated `handleMcpEndpoint` to return HTTP 401 for unauthenticated requests:
+
+```typescript
+const handleMcpEndpoint = async (req: any, res: any) => {
+    try {
+        const authHeader = req.headers.authorization;
+        const token = extractBearerToken(authHeader);
+        const serverUrl = process.env.MCP_SERVER_URL || `${req.protocol}://${req.get('host')}`;
+        
+        // Check if this request requires authentication
+        const requiresAuth = shouldRequireAuth(req.body);
+        
+        // If authentication is required but no token provided, return 401
+        if (requiresAuth && !token) {
+            res.status(401)
+               .set('WWW-Authenticate', buildWWWAuthenticateHeader({
+                   realm: serverUrl,
+                   scope: 'profile',
+                   resource_metadata: `${serverUrl}/.well-known/oauth-protected-resource`
+               }))
+               .json({
+                   jsonrpc: '2.0',
+                   error: {
+                       code: -32001,
+                       message: 'Authentication required. Please authenticate to access this resource.'
+                   },
+                   id: req.body?.id || null
+               });
+            return;
+        }
+        
+        // If token is provided, validate it and ensure session exists
+        if (token) {
+            const session = await findOrCreateSessionFromToken(sessionManager, authHeader);
+            if (!session) {
+                res.status(401)
+                   .set('WWW-Authenticate', buildWWWAuthenticateHeader({
+                       realm: serverUrl,
+                       error: 'invalid_token',
+                       errorDescription: 'The access token is invalid or expired',
+                       resource_metadata: `${serverUrl}/.well-known/oauth-protected-resource`
+                   }))
+                   .json({
+                       jsonrpc: '2.0',
+                       error: {
+                           code: -32001,
+                           message: 'Invalid or expired access token'
+                       },
+                       id: req.body?.id || null
+                   });
+                return;
+            }
+        }
+        
+        // Proceed with normal MCP handling
+        // ... rest of implementation
+    }
+};
+```
+
+## How It Works
+
+### OAuth Discovery Flow
+
+1. **User adds connector in Claude**
+   - Claude sends `initialize` request (no Bearer token)
+   - Server allows this request (capability discovery)
+   - Server returns capabilities
+
+2. **User clicks "Add from IntelligenceBank"**
+   - Claude sends `resources/list` request (no Bearer token)
+   - Server returns HTTP 401 with WWW-Authenticate header:
+     ```
+     WWW-Authenticate: Bearer realm="https://mcp.connectingib.com",
+                              resource_metadata="https://mcp.connectingib.com/.well-known/oauth-protected-resource",
+                              scope="profile"
+     ```
+
+3. **Claude discovers OAuth configuration**
+   - Fetches Protected Resource Metadata from `/.well-known/oauth-protected-resource`
+   - Discovers authorization server URL
+   - Fetches Authorization Server Metadata from `/.well-known/oauth-authorization-server`
+   - Gets OAuth endpoints and client configuration
+
+4. **Claude initiates OAuth flow automatically**
+   - Opens OAuth authorization URL in browser
+   - User authenticates with IntelligenceBank
+   - OAuth bridge redirects to `/callback`
+   - Server exchanges code for tokens
+   - User sees success page
+
+5. **Claude retries with Bearer token**
+   - Claude sends `resources/list` with `Authorization: Bearer <token>`
+   - Server validates token and creates session
+   - Server returns resources
+   - Claude shows "Connected" status
+
+### Key Features
+
+- ✅ **Automatic OAuth Discovery**: No manual configuration needed
+- ✅ **Standards Compliant**: Follows MCP Authorization specification (RFC9728, RFC8414)
+- ✅ **Secure**: PKCE flow with proper token validation
+- ✅ **User Friendly**: Authentication happens automatically when adding connector
+- ✅ **Backward Compatible**: Existing tools and manual auth still work
+
+## Testing Status
+
+### Build Status ✅
+```bash
+npm run build
+# ✅ Build completed successfully with no errors
+```
+
+### Next Steps for Testing
+
+1. **Deploy to Production**:
+   ```bash
+   ./scripts/deploy.sh
+   ```
+
+2. **Test in Claude Desktop**:
+   - Remove existing IB connector
+   - Add connector with URL: `https://mcp.connectingib.com/mcp`
+   - **Expected**: OAuth authentication screen appears automatically
+   - Complete authentication
+   - **Expected**: Connector shows "Connected" status
+   - Click "Add from IntelligenceBank"
+   - **Expected**: Resources appear without additional authentication
+
+3. **Verify with curl**:
+   ```bash
+   # Test 401 response for unauthenticated resource request
+   curl -v -X POST https://mcp.connectingib.com/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}'
+   
+   # Should return:
+   # HTTP/1.1 401 Unauthorized
+   # WWW-Authenticate: Bearer realm="https://mcp.connectingib.com", resource_metadata="https://mcp.connectingib.com/.well-known/oauth-protected-resource", scope="profile"
+   ```
+
+## Previous Task: MCP Resources - Simplified Implementation ✅
+
+### What Was Done
+
+Stripped back to a basic Resources List API call with the following characteristics:
+
+1. **Single API Endpoint** ✅
+   - Uses IntelligenceBank Resources List API
+   - Endpoint: `GET /api/3.0.0/{clientId}/resource.limit(100).order(lastUpdateTime:-1).fields().includeAmaTags(...)`
+   - Always includes `searchParams[isSearching]=true`
+   - Supports optional `searchParams[keywords]` for search
+   - Returns up to 100 resources per page
+
+2. **Simplified URI Scheme** ✅
+   - Single URI type: `ib://{clientId}/resource/{resourceId}`
+   - Removed: folder URIs, folder-resources URIs, search URIs
+   - Easier to debug and maintain
+
+3. **New API Client Function** ✅
+   - Added `fetchResourcesList()` in [`src/api/ib-api-client.ts`](../src/api/ib-api-client.ts)
+   - Properly configured with all required parameters
+   - Orders by `lastUpdateTime:-1` (most recent first)
+   - Includes all AMA tags for rich metadata
+
+4. **Simplified Resource Handlers** ✅
+   - Rewrote [`src/resources/resource-handlers.ts`](../src/resources/resource-handlers.ts)
+   - `handleResourceList()`: Returns all resources with optional keyword filtering
+   - `handleResourceRead()`: Returns detailed metadata for a single resource
+   - Cursor-based pagination with embedded keywords support
+   - Removed complex folder browsing logic
+
+5. **Simplified URI Parser** ✅
+   - Rewrote [`src/utils/uri-parser.ts`](../src/utils/uri-parser.ts)
+   - Only handles resource URIs
+   - Clear error messages for invalid URIs
+
+6. **Updated MCP Server Registration** ✅
+   - Modified [`src/index.ts`](../src/index.ts)
+   - Single ResourceTemplate: `ib://{clientId}/resource/{resourceId}`
+   - Updated startup logging to reflect simplified scope
+
+7. **Documentation** ✅
+   - Created [`docs/simplified-resources-implementation-plan.md`](simplified-resources-implementation-plan.md)
+   - Updated [`docs/mcp-resources-implementation-plan.md`](mcp-resources-implementation-plan.md)
+   - Updated this document
+
+## Implementation Details
+
+### API Call Structure
+
+```typescript
+// New fetchResourcesList() function
+const url = `${apiV3url}/api/3.0.0/${clientId}/resource.limit(${offset},${limit}).order(lastUpdateTime:-1).fields().includeAmaTags(brands,locations,topics,objects,landmarks,keywords,faces)`;
+
+const params = new URLSearchParams({
+    'searchParams[isSearching]': 'true',
+    'searchParams[keywords]': keywords,
+    productkey: 'mcp-server',
+    verbose: 'true'
+});
+```
+
+### Resource List Response
+
+Each resource includes:
+- URI: `ib://{clientId}/resource/{resourceId}`
+- Name: Resource name
+- Description: File type, size, and last update date
+- MIME type: Derived from file extension
+- Annotations: Audience, priority, last modified timestamp
+
+### Pagination
+
+Uses cursor-based pagination with embedded keywords:
+```typescript
+// Cursor format (base64 encoded JSON)
 {
-  "error": "Upload failed"
+    "offset": 100,
+    "keywords": "search term"
 }
 ```
 
-### Security Considerations
+### Resource Read
 
-1. **File Size Limits**: 50MB maximum to prevent abuse
-2. **File Type Validation**: Only allow document types
-3. **Rate Limiting**: Prevent upload spam (to be implemented)
-4. **Temporary Storage**: Files automatically deleted after 5 minutes
-5. **No Persistent Storage**: No long-term file retention
-6. **Unique File IDs**: Cryptographically random (32 bytes hex)
-7. **No Directory Listing**: No way to enumerate uploaded files
-8. **Access Control**: Files accessible only via their unique ID
+Returns detailed metadata including:
+- File information (type, size, hash)
+- Thumbnail URL
+- Tags
+- Folder path
+- Download URL
+- Creation and update timestamps
+- Creator information
+- Allowed actions
 
-### File Cleanup Strategy
+## Benefits of Simplified Approach
 
-- **TTL**: 5 minutes from upload time
-- **Automatic Cleanup**: setTimeout triggers file deletion
-- **Cleanup on Use**: File deleted after successful upload to IntelligenceBank
-- **Cleanup on Error**: File remains for TTL (allows retry)
-- **Server Shutdown**: All files cleaned up gracefully
-- **Storage Location**: `/tmp/ib-mcp-uploads/` (auto-cleaned by OS)
+1. **Clear Error Diagnosis**: Single API call, single code path makes debugging easier
+2. **Solid Foundation**: Once basic list works, can add complexity incrementally
+3. **Faster Development**: Less code means faster implementation and testing
+4. **Better UX**: Users see all resources immediately, can search with keywords
+5. **Easier Maintenance**: Simpler code is easier to understand and modify
 
----
+## What Was Removed (Temporarily)
 
-## Migration Strategy
+- Folder browsing capability
+- Folder resources listing
+- Complex URI schemes with multiple types
+- Search as separate URI type
 
-### Phase 1: Implementation (This Week)
-- [x] Design solution architecture
-- [x] Implement upload endpoint
-- [x] Update compliance review tool
-- [x] Add security measures
-- [ ] Test end-to-end workflow
-- [ ] Deploy to production
+These features can be added back incrementally once the basic Resources List is confirmed working.
 
-### Phase 2: Documentation (This Week)
-- [ ] Update README with file upload workflow
-- [ ] Create usage examples for two-step upload
-- [ ] Document limitations and best practices
-- [ ] Update codebase summary
+## Testing Status
 
-### Phase 3: Monitoring (Next Week)
-- [ ] Monitor upload endpoint usage
-- [ ] Track file sizes and cleanup
-- [ ] Identify any edge cases
-- [ ] Optimize performance if needed
-- [ ] Gather user feedback
+### Build Status ✅
+```bash
+npm run build
+# ✅ Build completed successfully with no errors
+```
 
----
+### Next Steps for Testing
 
-## Future Considerations
+1. **Local Testing with MCP Inspector**:
+   ```bash
+   PORT=3001 MCP_SERVER_URL=http://localhost:3001 node dist/index.js
+   npx @modelcontextprotocol/inspector http://localhost:3001/mcp
+   ```
+   - Complete OAuth flow
+   - Call resources/list
+   - Verify resources appear
+   - Test pagination
+   - Test keyword search via cursor
 
-### When MCP Protocol Supports Binary Resources
+2. **Production Deployment**:
+   ```bash
+   ./scripts/deploy.sh
+   ```
 
-Once the MCP protocol adds native support for binary resources (planned feature):
+3. **Production Testing with Claude Desktop**:
+   - Add IntelligenceBank connector
+   - Click "Add from IntelligenceBank"
+   - Complete OAuth if needed
+   - Verify resources appear
+   - Select a resource to view details
 
-1. Implement MCP resource handler for files
-2. Update tool to accept resource URIs
-3. Deprecate upload endpoint (or keep as fallback)
-4. Update documentation
-5. Maintain backward compatibility
+## OAuth Flow Status
 
-### Potential Enhancements
+The OAuth flow remains fully functional:
+- ✅ Metadata discovery working
+- ✅ Client ID discovery working (`mcp-public-client`)
+- ✅ OAuth flow completes successfully
+- ✅ Session creation from Bearer tokens working
+- ✅ Bearer token-based session lookup working
 
-- File upload progress tracking
-- Support for multiple file uploads in single request
-- File preview/validation before review
-- Integration with cloud storage (S3) for larger files
-- Direct streaming from client to IntelligenceBank (avoiding temporary storage)
-- Caching of uploaded files across multiple reviews
+## Future Enhancements
 
----
+Once the simplified version is confirmed working in production:
 
-## Next Steps
+1. **Folder Browser**: Add back folder navigation
+   - New URIs: `ib://{clientId}/folder/{folderId}`
+   - List subfolders and resources within folder
 
-### Completed Actions
-1. ✅ Installed `multer` dependency: `npm install multer @types/multer`
-2. ✅ Created upload handler implementation ([`src/server/upload-handler.ts`](../src/server/upload-handler.ts:1))
-3. ✅ Integrated into Express server setup ([`src/index.ts:109`](../src/index.ts:109))
-4. ✅ Updated compliance review tool to accept `fileId` ([`src/tools/run-file-compliance-review.tool.ts:84`](../src/tools/run-file-compliance-review.tool.ts:84))
-5. ✅ Added automatic file cleanup after successful use
-6. ✅ Updated tool description with upload instructions
+2. **Advanced Search**: Add dedicated search endpoint
+   - Support filters: file type, date range, tags
 
-### Next Actions
-1. Test locally with MCP Inspector
-2. Test file upload workflow end-to-end
-3. Verify file cleanup mechanisms
-4. Deploy to production EC2 instance
-5. Test with Claude desktop in production
+3. **Resource Subscriptions**: Enable MCP subscriptions
+   - Monitor resource changes
+   - Send notifications on updates
 
-### Testing Checklist
-- [ ] Upload 100KB file successfully
-- [ ] Upload 1.6MB file successfully
-- [ ] Upload 10MB file successfully
-- [ ] Upload 50MB file successfully
-- [ ] Verify file cleanup after 5 minutes
-- [ ] Test with expired file ID
-- [ ] Test with invalid file ID
-- [ ] Verify no context pollution in Claude conversation
-- [ ] Complete end-to-end compliance review
-- [ ] Test error scenarios
+4. **Resource Templates**: Add parameterized templates
+   - Auto-complete folder IDs
 
-### Related Documentation
+## Documentation
 
-- **Current Implementation**: [`src/tools/run-file-compliance-review.tool.ts`](../src/tools/run-file-compliance-review.tool.ts:1)
-- **Type Definitions**: [`src/types/compliance-review.types.ts`](../src/types/compliance-review.types.ts:1)
-- **Server Setup**: [`src/server/express-setup.ts`](../src/server/express-setup.ts:1)
-- **Deployment**: [`scripts/deploy.sh`](../scripts/deploy.sh:1)
+### Implementation Documents
+- [`docs/simplified-resources-implementation-plan.md`](simplified-resources-implementation-plan.md) - Detailed implementation plan
+- [`docs/mcp-resources-implementation-plan.md`](mcp-resources-implementation-plan.md) - Original implementation plan (updated)
+- [`docs/currentTask.md`](currentTask.md) - This document
 
----
+### Reference Documents
+- [`docs/mcp-docs/authorization.md`](mcp-docs/authorization.md) - MCP Authorization specification
+- [`docs/mcp-docs/resources.md`](mcp-docs/resources.md) - MCP Resources specification
 
-## Previous Task: File Compliance Review Implementation ✅ Completed
+## Conclusion
 
-Successfully implemented outcome-based file compliance review tools for the IntelligenceBank API Tools MCP Server.
+The simplified Resources implementation is complete and ready for testing:
+- ✅ Single API endpoint (Resources List)
+- ✅ Simple URI scheme (resources only)
+- ✅ Keyword search support via cursor
+- ✅ Pagination support (100 resources per page)
+- ✅ Sorted by last update time (most recent first)
+- ✅ OAuth authentication fully functional
+- ✅ Build successful with no errors
 
-### Implemented Features
-
-#### 1. New MCP Tools
-
-**get_compliance_filters** - Retrieves available category filters from IntelligenceBank API for use in compliance reviews.
-
-**run_file_compliance_review** - Comprehensive outcome-based tool that handles the entire compliance review workflow.
-
-#### 2. MCP Prompt Resource
-
-**compliance_review_help** - Post-login guidance prompt that appears in Claude's interface.
-
-### Deployment Details
-
-- **Production Endpoint:** https://mcp.connectingib.com/mcp
-- **Deployment Date:** October 26, 2025
-- **Status:** Operational but blocked by file handling issue
-
-### Key Design Decisions
-
-1. **Outcome-Based Tool Pattern** - Single tool call for complete workflow
-2. **Enhanced Tool Descriptions** - Detailed response format documentation
-3. **Optional Category Filters** - Flexible categorization support
-4. **Internal Polling** - Transparent status checking
-
-### Testing Status
-
-- ✅ TypeScript compilation successful
-- ✅ Tool registration verified
-- ✅ Deployed to production successfully
-- ⏸️ End-to-end testing blocked by file handling issue
-
-### Documentation
-
-- **Design Pattern:** [`docs/design-options/outcome_tools_guide.md`](design-options/outcome_tools_guide.md:1)
-- **Project Roadmap:** [`docs/projectRoadmap.md`](projectRoadmap.md:1)
-- **Codebase Summary:** [`docs/codebaseSummary.md`](codebaseSummary.md:1)
-- **Tech Stack:** [`docs/techStack.md`](techStack.md:1)
+Ready for deployment and testing in production environment.

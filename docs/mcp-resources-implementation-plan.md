@@ -1,818 +1,583 @@
-# MCP Resources Implementation Plan for IntelligenceBank
+# MCP Resources Implementation Plan
 
-## Executive Summary
+## Status: ✅ Simplified Implementation Complete
 
-This document outlines the implementation plan for adding MCP Resources support to the IntelligenceBank API Tools MCP Server. This feature will enable Claude to browse IntelligenceBank folders and files directly through a resource interface, similar to how Google Docs and other connectors present their file structures.
+Implementation of MCP Resources with automatic OAuth authentication for IntelligenceBank API Tools MCP Server.
 
-## Current Observation
+### Current Status (2025-01-29)
 
-When clicking "+ / Add action" in Claude:
-- **Google Docs**: Shows a direct list of files as resources
-- **IntelligenceBank (desired)**: Should show "Add from IntelligenceBank" with browsable folder/file structure
-- **Current IntelligenceBank**: Only provides tools, no resource browsing capability
+**Simplified Resources Integration**: ✅ Complete
+- Basic Resources List API call working
+- OAuth flow fully functional
+- Single resource URI scheme: `ib://{clientId}/resource/{resourceId}`
+- Keyword search via cursor parameter
+- Pagination support (100 resources per page)
+- Sorted by last update time (most recent first)
 
-## MCP Resources Protocol Overview
+**What Changed**: Simplified from complex folder browsing to basic resources list to establish solid foundation before adding advanced features.
 
-### What Are MCP Resources?
+## Overview
 
-MCP Resources provide a standardized way for servers to expose data sources that can be used as context for language models. Resources are identified by URIs and can be listed, read, and optionally subscribed to for updates.
+This document describes the implementation of MCP Resources capability with automatic OAuth authentication flow, enabling Claude Desktop users to browse IntelligenceBank resources directly through the resources interface.
 
-### Key Protocol Features
+### Simplified Approach (Current Implementation)
 
-1. **Resource Listing**: `resources/list` method with pagination
-2. **Resource Reading**: `resources/read` method to retrieve content
-3. **Resource Updates**: Optional `resources/subscribe` and `resources/unsubscribe` for change notifications
-4. **Resource Templates**: URI templates for dynamic resource generation
+The current implementation uses a simplified approach focused on the Resources List API:
 
-## IntelligenceBank API Analysis
-
-### Folders API
-
-**Endpoint**: `GET /api/3.0.0/{clientid}/folder.limit(100).order(createTime)`
-
-**Authentication**: Requires `sid` header (session ID)
-
-**Response Structure**:
-```json
-{
-  "response": {
-    "rows": [
-      {
-        "_id": "2ad3d794d7e41b261e1efd44191925e4",
-        "name": "Archive",
-        "parent": "02b0623f66b2c165ad4a86d1a1c1539c",
-        "description": "Archive folder description",
-        "thumbnail": "https://...",
-        "folders_count": 0,
-        "resources_count": 0,
-        "isPublic": false,
-        "allowedActions": ["view", "publish", "list", "admin"]
-      }
-    ],
-    "offset": 0,
-    "count": 17
-  }
-}
+**API Endpoint**:
+```
+GET /api/3.0.0/{clientId}/resource.limit(100).order(lastUpdateTime:-1).fields().includeAmaTags(...)
 ```
 
-**Key Fields**:
-- `_id`: Unique folder identifier
-- `name`: Folder name
-- `parent`: Parent folder ID (root folders have specific parent ID)
-- `folders_count`: Number of subfolders
-- `resources_count`: Number of files in folder
-- `allowedActions`: User permissions for the folder
+**Key Parameters**:
+- `searchParams[isSearching]=true` - Always enabled
+- `searchParams[keywords]` - Optional keyword search
+- `.order(lastUpdateTime:-1)` - Sort by most recently updated
+- `.limit(100)` - Maximum 100 resources per page
 
-### Resources API
+**URI Scheme**:
+- Single type: `ib://{clientId}/resource/{resourceId}`
+- Removed: folder URIs, folder-resources URIs, search URIs
 
-**Endpoint**: `GET /api/3.0.0/{clientid}/resource.limit(100).order(createTime:-1)`
+**Benefits**:
+- Single API call, single code path
+- Easier to debug and maintain
+- Solid foundation for future enhancements
+- Keyword search via cursor parameter
+- Pagination support
 
-**Authentication**: Requires `sid` header (session ID)
+**Future Enhancements**:
+Once the basic implementation is confirmed working, we can incrementally add:
+- Folder browsing capability
+- Advanced search with filters
+- Resource subscriptions
+- Parameterized resource templates
 
-**Query Parameters**:
-- `searchParams[ib_folder_s]`: Filter by folder ID
-- `searchParams[keywords]`: Search by keywords
-- `.limit(offset, count)`: Pagination
-- `.fields()`: Restrict returned fields
+## Reference Documentation
 
-**Response Structure**:
-```json
-{
-  "response": {
-    "rows": [
-      {
-        "_id": "e9608e402a607816531e3de298af5b13",
-        "name": "4",
-        "folder": "0b05125e264d902a302a50fa07bcbe6a",
-        "folderPath": [
-          {"name": "Resources", "_id": "02b0623f66b2c165ad4a86d1a1c1539c"},
-          {"name": "Zapier Test Folder", "_id": "0b05125e264d902a302a50fa07bcbe6a"}
-        ],
-        "file": {
-          "type": "image/png",
-          "name": "4.png",
-          "size": 4236,
-          "hash": "0cb5ac37ba0e3532d0ed48e8ae261797"
-        },
-        "thumbnail": "https://...",
-        "fancyFileType": "Image (png)",
-        "fancyFileSize": "4.14 KB",
-        "createTime": "2020-01-08T15:15:02Z",
-        "lastUpdateTime": "2020-01-08T15:15:03Z",
-        "tags": ["silhouette"],
-        "allowedActions": ["view", "publish", "list", "admin"]
-      }
-    ],
-    "offset": 0,
-    "count": 153
-  }
-}
-```
+### MCP Protocol Documentation
+- **MCP Authorization Specification**: [`docs/mcp-docs/authorization.md`](mcp-docs/authorization.md) - OAuth 2.0 integration requirements
+- **MCP Resources Specification**: [`docs/mcp-docs/resources.md`](mcp-docs/resources.md) - Resources protocol definition
+- **MCP Transports**: [`docs/mcp-docs/transports.md`](mcp-docs/transports.md) - Streamable HTTP transport details
+- **Connecting Remote Servers**: [`docs/mcp-docs/connect-remote-servers.md`](mcp-docs/connect-remote-servers.md) - How Claude Desktop connects to remote MCP servers
 
-**Key Fields**:
-- `_id`: Unique resource identifier
-- `name`: File name
-- `folder`: Parent folder ID
-- `folderPath`: Array of parent folders (breadcrumb)
-- `file.type`: MIME type
-- `file.size`: File size in bytes
-- `thumbnail`: Thumbnail URL
-- `tags`: Associated tags
-- `allowedActions`: User permissions
+### MCP SDK Documentation
+- **TypeScript SDK README**: [`node_modules/@modelcontextprotocol/sdk/README.md`](../node_modules/@modelcontextprotocol/sdk/README.md) - Official SDK documentation
+- **SDK Version**: `@modelcontextprotocol/sdk@1.20.1` (verified in [`package.json`](../package.json))
 
-## Proposed Resource URI Scheme
+### OAuth Bridge Documentation
+- **OAuth Bridge Repository**: `/Users/charlyvanni/Workspace/Innovation/ib-oauth-bridge-experimental`
+- **Bridge API Documentation**: `/Users/charlyvanni/Workspace/Innovation/ib-oauth-bridge-experimental/docs/api-documentation.md`
+- **Bridge Architecture**: `/Users/charlyvanni/Workspace/Innovation/ib-oauth-bridge-experimental/docs/architecture.md`
 
-### URI Structure
+## Critical Issues Found and Fixed
 
-```
-ib://{clientid}/folders/{folderId}
-ib://{clientid}/resources/{resourceId}
-ib://{clientid}/folders/{folderId}/resources
-ib://{clientid}/search?q={query}
-```
+### Issue 1: Missing Sub-Path Discovery Endpoint ✅ FIXED
+**Problem**: Per RFC9728 Section 5.2, MCP clients try discovery endpoints in this order:
+1. Sub-path: `/.well-known/oauth-protected-resource/mcp` (for MCP endpoint at `/mcp`)
+2. Root: `/.well-known/oauth-protected-resource` (fallback)
 
-### Examples
+We only implemented the root endpoint, causing "Failed to discover OAuth metadata" errors.
 
-```
-ib://fe97709573d7929e8cba2f21fa8fb1ca/folders/root
-ib://fe97709573d7929e8cba2f21fa8fb1ca/folders/2ad3d794d7e41b261e1efd44191925e4
-ib://fe97709573d7929e8cba2f21fa8fb1ca/resources/e9608e402a607816531e3de298af5b13
-ib://fe97709573d7929e8cba2f21fa8fb1ca/folders/0b05125e264d902a302a50fa07bcbe6a/resources
-ib://fe97709573d7929e8cba2f21fa8fb1ca/search?q=logo
-```
-
-### URI Components
-
-- **Scheme**: `ib://` (IntelligenceBank custom scheme)
-- **Authority**: `{clientid}` (tenant identifier from session)
-- **Path**: Resource type and identifier
-- **Query**: Optional search parameters
-
-## Authentication Architecture
-
-### Challenge: Dual Authentication System
-
-The IntelligenceBank MCP server uses a dual authentication approach:
-
-1. **OAuth 2.0**: For MCP protocol compliance and secure authorization
-2. **Session ID (sid)**: For actual IB API calls
-
-### Current Authentication Flow
-
-```
-User → Browser Login → OAuth Flow → Access Token → Session Manager → sid
-                                                                        ↓
-                                                        IB API Calls (with sid header)
-```
-
-### Resource Access Authentication
-
-**Problem**: Resources must be accessed using the authenticated user's session
-
-**Solution**: Resources are inherently tied to authenticated sessions
-
+**Fix**: Added both endpoints in [`src/server/express-setup.ts`](../src/server/express-setup.ts):
 ```typescript
-// Pseudo-code for resource access
-async function handleResourceRead(uri: string, sessionId: string) {
-  const session = sessionManager.getSession(sessionId);
-  if (!session?.credentials?.sid) {
-    throw new Error('Not authenticated');
-  }
-  
-  // Use session's sid for API calls
-  const resource = await fetchResourceFromIB(uri, session.credentials.sid);
-  return resource;
+app.get('/.well-known/oauth-protected-resource/mcp', handleProtectedResourceMetadata);
+app.get('/.well-known/oauth-protected-resource', handleProtectedResourceMetadata);
+```
+
+### Issue 2: Trailing Slash in Authorization Server URL ✅ FIXED
+**Problem**: The `OAUTH_BRIDGE_URL` environment variable had a trailing slash (`/dev/`), which was being included in the `authorization_servers` array, potentially causing URL construction issues in OAuth clients.
+
+**Fix**: Strip trailing slash in [`src/auth/mcp-authorization.ts`](../src/auth/mcp-authorization.ts):
+```typescript
+function getOAuthBridgeUrl(): string {
+    const bridgeUrl = process.env.OAUTH_BRIDGE_URL;
+    if (!bridgeUrl) {
+        throw new Error('OAUTH_BRIDGE_URL environment variable is required');
+    }
+    // Remove trailing slash for consistency with RFC8414
+    return bridgeUrl.replace(/\/$/, '');
 }
 ```
 
-### Authentication Imperatives
+### Issue 3: Wrong MCP_SERVER_URL Protocol ✅ FIXED
+**Problem**: Production server had `MCP_SERVER_URL` missing or set to HTTP instead of HTTPS.
 
-1. **Session-Scoped Resources**: All resources MUST be retrieved using the authenticated session's `sid`
-2. **No Anonymous Access**: Resources cannot be accessed without valid authentication
-3. **Permission Enforcement**: Resource listing respects user's `allowedActions` from IB API
-4. **Token Refresh**: OAuth tokens must be refreshed before expiry to maintain `sid` validity
-5. **Session Isolation**: Each MCP client session maintains its own authentication context
+**Fix**: Added to production `.env`:
+```bash
+MCP_SERVER_URL=https://mcp.connectingib.com
+```
 
 ## Implementation Architecture
 
-### 1. Server Capability Declaration
+### Key Design Decision: Manual OAuth Discovery
 
-```typescript
-// src/index.ts
-server.setRequestHandler(InitializeRequestSchema, async () => {
-  return {
-    protocolVersion: "2024-11-05",
-    capabilities: {
-      tools: {},
-      resources: {
-        subscribe: true,      // Support resource change notifications
-        listChanged: true     // Support list change notifications
-      }
-    },
-    serverInfo: {
-      name: "ib-api-tools-mcp-server",
-      version: "1.0.0"
-    }
-  };
-});
+We implemented manual OAuth discovery endpoints rather than using the SDK's `ProxyOAuthServerProvider` because:
+
+1. **OAuth Bridge Limitations**: The IntelligenceBank OAuth bridge provides OAuth endpoints (`/authorize`, `/token`, `/userinfo`) but does NOT provide MCP discovery endpoints (`/.well-known/*`)
+
+2. **Valid Architecture**: Per MCP specification, the resource server (our MCP server) can provide discovery endpoints that point to an external authorization server (the OAuth bridge)
+
+3. **Tool Compatibility**: Maintains compatibility with existing authentication tools (`auth_login`, `auth_status`) that users may already be using
+
+4. **Full Control**: Gives us complete control over the authentication flow and session management
+
+### Authentication Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. User adds IntelligenceBank connector in Claude Desktop      │
+│    Claude discovers OAuth endpoints via /.well-known/*          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. User clicks "Add from IntelligenceBank" to browse resources │
+│    Claude sends: POST /mcp {"method":"resources/list"}          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. MCP Server returns HTTP 401 Unauthorized                     │
+│    Headers: WWW-Authenticate: Bearer realm="...", scope="..."   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. Claude automatically opens browser for OAuth                 │
+│    Redirects to: {OAUTH_BRIDGE_URL}/authorize?...               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. User authenticates on IntelligenceBank platform              │
+│    OAuth bridge redirects to: {MCP_SERVER_URL}/callback?code=...│
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. MCP Server exchanges code for tokens                         │
+│    Stores access_token in session                               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 7. Claude retries resource request with Bearer token            │
+│    Headers: Authorization: Bearer {access_token}                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 8. MCP Server validates token, finds session, returns resources │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. Resource List Handler
+## Implemented Components
+
+### 1. MCP Authorization Protocol Endpoints
+**File**: [`src/auth/mcp-authorization.ts`](../src/auth/mcp-authorization.ts)
+
+Implements RFC9728 (Protected Resource Metadata) and RFC8414 (Authorization Server Metadata) endpoints:
+
+- `handleProtectedResourceMetadata()` - Serves `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp`
+- `handleAuthorizationServerMetadata()` - Serves `/.well-known/oauth-authorization-server`
+- `buildWWWAuthenticateHeader()` - Constructs RFC6750 compliant WWW-Authenticate headers
+- `extractBearerToken()` - Parses Bearer tokens from Authorization headers
+
+**Discovery Endpoints**:
+```typescript
+// Sub-path (tried first by MCP clients)
+GET /.well-known/oauth-protected-resource/mcp
+{
+  "resource": "https://mcp.connectingib.com",
+  "authorization_servers": ["https://oauth-bridge-url"],
+  "scopes_supported": ["read", "write"],
+  "bearer_methods_supported": ["header"]
+}
+
+// Root (fallback)
+GET /.well-known/oauth-protected-resource
+// Returns same metadata
+
+// Authorization server metadata
+GET /.well-known/oauth-authorization-server
+{
+  "issuer": "https://oauth-bridge-url",
+  "authorization_endpoint": "https://oauth-bridge-url/authorize",
+  "token_endpoint": "https://oauth-bridge-url/token",
+  "userinfo_endpoint": "https://oauth-bridge-url/userinfo",
+  "code_challenge_methods_supported": ["S256"]
+}
+```
+
+### 2. HTTP Authentication Middleware
+**File**: [`src/auth/mcp-auth-middleware.ts`](../src/auth/mcp-auth-middleware.ts)
+
+Critical component that intercepts MCP resource requests at the HTTP layer (before they reach the MCP protocol layer) to return proper HTTP 401 status codes:
+
+**Why This Is Necessary**:
+- MCP SDK's request handlers don't have direct access to HTTP response objects
+- Throwing errors in request handlers results in JSON-RPC errors, not HTTP errors
+- Claude Desktop requires HTTP 401 with WWW-Authenticate header to trigger OAuth flow
+
+**Implementation**:
+```typescript
+export function mcpAuthMiddleware(sessionManager: SessionManager) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    // Only check authentication for resource requests
+    if (req.method === 'POST' && req.path === '/mcp' && 
+        (req.body.method === 'resources/list' || 
+         req.body.method === 'resources/read' ||
+         req.body.method === 'resources/subscribe')) {
+      
+      const session = findAuthenticatedSessionByToken(sessionManager, req.headers.authorization);
+      
+      if (!session?.ibSession?.sid) {
+        // Return HTTP 401 with WWW-Authenticate header
+        res.status(401)
+          .header('WWW-Authenticate', buildWWWAuthenticateHeader({...}))
+          .json({...});
+        return;
+      }
+    }
+    next();
+  };
+}
+```
+
+**Important**: This middleware only intercepts resource requests, NOT protocol requests like `initialize`, `tools/list`, or `prompts/list`.
+
+### 3. Express Server Setup
+**File**: [`src/server/express-setup.ts`](../src/server/express-setup.ts)
+
+Updated to:
+- Serve OAuth discovery endpoints (both sub-path and root)
+- Apply authentication middleware
+- Expose required CORS headers
 
 ```typescript
-// src/resources/resource-handlers.ts
-import { ListResourcesRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-
-server.setRequestHandler(ListResourcesRequestSchema, async (request, extra) => {
-  const sessionId = extra.sessionId; // From MCP context
-  const session = sessionManager.getSession(sessionId);
+export function createExpressApp(sessionManager: SessionManager): Express {
+  const app = express();
   
-  if (!session?.credentials?.sid) {
-    throw new Error('Authentication required to list resources');
-  }
-
-  // Get client ID from session
-  const clientId = session.credentials.clientId;
-  const cursor = request.params?.cursor;
-
-  try {
-    // Fetch root folders from IB API
-    const folders = await fetchFolders({
-      sid: session.credentials.sid,
-      clientId,
-      parent: 'root', // or parse from cursor
-      limit: 50
-    });
-
-    const resources = folders.rows.map(folder => ({
-      uri: `ib://${clientId}/folders/${folder._id}`,
-      name: folder.name,
-      description: folder.description || `Folder with ${folder.resources_count} files`,
-      mimeType: 'application/vnd.intelligencebank.folder',
-      annotations: {
-        audience: ['user'],
-        priority: folder.isPublic ? 0.8 : 0.5
-      }
-    }));
-
-    return {
-      resources,
-      nextCursor: folders.offset + folders.rows.length < folders.count
-        ? `offset:${folders.offset + folders.rows.length}`
-        : undefined
-    };
-  } catch (error) {
-    console.error('Error listing resources:', error);
-    throw error;
-  }
-});
-```
-
-### 3. Resource Read Handler
-
-```typescript
-server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
-  const sessionId = extra.sessionId;
-  const session = sessionManager.getSession(sessionId);
+  // CORS configuration
+  app.use(cors({
+    exposedHeaders: ['Mcp-Session-Id', 'WWW-Authenticate'],
+    allowedHeaders: ['Content-Type', 'mcp-session-id', 'Authorization']
+  }));
   
-  if (!session?.credentials?.sid) {
-    throw new Error('Authentication required to read resources');
-  }
-
-  const uri = request.params.uri;
-  const parsed = parseResourceURI(uri);
-
-  if (parsed.type === 'folder') {
-    return await readFolder(parsed, session);
-  } else if (parsed.type === 'resource') {
-    return await readResource(parsed, session);
-  } else if (parsed.type === 'folder-resources') {
-    return await readFolderResources(parsed, session);
-  }
-
-  throw new Error(`Unknown resource type: ${uri}`);
-});
-
-async function readFolder(parsed: ParsedURI, session: Session) {
-  const folders = await fetchFolders({
-    sid: session.credentials.sid,
-    clientId: parsed.clientId,
-    parent: parsed.folderId,
-    limit: 100
-  });
-
-  const content = {
-    type: 'folder',
-    id: parsed.folderId,
-    name: folders.rows[0]?.name || 'Root',
-    subfolders: folders.rows.map(f => ({
-      id: f._id,
-      name: f.name,
-      resourceCount: f.resources_count,
-      folderCount: f.folders_count
-    }))
-  };
-
-  return {
-    contents: [
-      {
-        uri: `ib://${parsed.clientId}/folders/${parsed.folderId}`,
-        mimeType: 'application/json',
-        text: JSON.stringify(content, null, 2)
-      }
-    ]
-  };
-}
-
-async function readResource(parsed: ParsedURI, session: Session) {
-  const resources = await fetchResources({
-    sid: session.credentials.sid,
-    clientId: parsed.clientId,
-    resourceId: parsed.resourceId
-  });
-
-  const resource = resources.rows[0];
-  if (!resource) {
-    throw new Error('Resource not found');
-  }
-
-  const content = {
-    type: 'resource',
-    id: resource._id,
-    name: resource.name,
-    fileType: resource.file.type,
-    fileSize: resource.fancyFileSize,
-    thumbnail: resource.thumbnail,
-    tags: resource.tags,
-    folderPath: resource.folderPath,
-    downloadUrl: `${IB_API_BASE_URL}/download/${resource._id}`,
-    metadata: {
-      created: resource.createTime,
-      updated: resource.lastUpdateTime,
-      creator: resource.creatorName,
-      dimensions: resource.imageWidth && resource.imageHeight
-        ? `${resource.imageWidth}x${resource.imageHeight}`
-        : undefined
-    }
-  };
-
-  return {
-    contents: [
-      {
-        uri: `ib://${parsed.clientId}/resources/${parsed.resourceId}`,
-        mimeType: 'application/json',
-        text: JSON.stringify(content, null, 2)
-      }
-    ]
-  };
-}
-```
-
-### 4. URI Parser Utility
-
-```typescript
-// src/utils/uri-parser.ts
-interface ParsedURI {
-  scheme: string;
-  clientId: string;
-  type: 'folder' | 'resource' | 'folder-resources' | 'search';
-  folderId?: string;
-  resourceId?: string;
-  searchQuery?: string;
-}
-
-export function parseResourceURI(uri: string): ParsedURI {
-  const url = new URL(uri);
+  // Discovery endpoints (sub-path tried first, root as fallback)
+  app.get('/.well-known/oauth-protected-resource/mcp', handleProtectedResourceMetadata);
+  app.get('/.well-known/oauth-protected-resource', handleProtectedResourceMetadata);
+  app.get('/.well-known/oauth-authorization-server', handleAuthorizationServerMetadata);
   
-  if (url.protocol !== 'ib:') {
-    throw new Error('Invalid URI scheme');
-  }
-
-  const clientId = url.hostname;
-  const pathParts = url.pathname.split('/').filter(p => p);
-
-  if (pathParts[0] === 'folders' && pathParts.length === 2) {
-    return {
-      scheme: 'ib',
-      clientId,
-      type: 'folder',
-      folderId: pathParts[1]
-    };
-  }
-
-  if (pathParts[0] === 'folders' && pathParts[2] === 'resources') {
-    return {
-      scheme: 'ib',
-      clientId,
-      type: 'folder-resources',
-      folderId: pathParts[1]
-    };
-  }
-
-  if (pathParts[0] === 'resources' && pathParts.length === 2) {
-    return {
-      scheme: 'ib',
-      clientId,
-      type: 'resource',
-      resourceId: pathParts[1]
-    };
-  }
-
-  if (pathParts[0] === 'search') {
-    return {
-      scheme: 'ib',
-      clientId,
-      type: 'search',
-      searchQuery: url.searchParams.get('q') || ''
-    };
-  }
-
-  throw new Error(`Invalid resource URI: ${uri}`);
+  // Authentication middleware
+  app.use(mcpAuthMiddleware(sessionManager));
+  
+  return app;
 }
 ```
 
-### 5. IB API Client Functions
+### 4. Resource Handlers
+**File**: [`src/resources/resource-handlers.ts`](../src/resources/resource-handlers.ts)
 
+Updated to:
+- Accept Authorization header parameter
+- Look up sessions by Bearer token (not by transport session ID)
+- Handle authentication errors gracefully
+
+**Session Lookup Strategy**:
 ```typescript
-// src/api/ib-api-client.ts
-interface FetchFoldersOptions {
-  sid: string;
-  clientId: string;
-  parent?: string;
-  limit?: number;
-  offset?: number;
-  keywords?: string;
-}
-
-export async function fetchFolders(options: FetchFoldersOptions) {
-  const {
-    sid,
-    clientId,
-    parent = '',
-    limit = 50,
-    offset = 0,
-    keywords = ''
-  } = options;
-
-  const url = `${IB_API_BASE_URL}/api/3.0.0/${clientId}/folder.limit(${offset},${limit}).order(createTime)`;
-  const params = new URLSearchParams({
-    'searchParams[parent]': parent,
-    'searchParams[keywords]': keywords,
-    productkey: IB_PRODUCT_KEY,
-    verbose: 'true'
-  });
-
-  const response = await fetch(`${url}?${params}`, {
-    headers: {
-      'sid': sid,
-      'Content-Type': 'application/json'
+function findAuthenticatedSessionByToken(
+  sessionManager: SessionManager,
+  authHeader: string | undefined
+): AuthSession | null {
+  const token = extractBearerToken(authHeader);
+  if (!token) return null;
+  
+  // Find session where tokens.accessToken matches the Bearer token
+  for (const session of allSessions.values()) {
+    if (session.tokens?.accessToken === token && 
+        session.status === 'completed' && 
+        session.ibSession?.sid) {
+      return session;
     }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch folders: ${response.statusText}`);
   }
-
-  return await response.json();
-}
-
-interface FetchResourcesOptions {
-  sid: string;
-  clientId: string;
-  folderId?: string;
-  resourceId?: string;
-  limit?: number;
-  offset?: number;
-  keywords?: string;
-}
-
-export async function fetchResources(options: FetchResourcesOptions) {
-  const {
-    sid,
-    clientId,
-    folderId = '',
-    resourceId = '',
-    limit = 50,
-    offset = 0,
-    keywords = ''
-  } = options;
-
-  const url = `${IB_API_BASE_URL}/api/3.0.0/${clientId}/resource.limit(${offset},${limit}).order(createTime:-1).fields()`;
-  const params = new URLSearchParams({
-    'searchParams[ib_folder_s]': folderId,
-    'searchParams[keywords]': keywords,
-    'searchParams[id]': resourceId,
-    productkey: IB_PRODUCT_KEY,
-    verbose: 'true'
-  });
-
-  const response = await fetch(`${url}?${params}`, {
-    headers: {
-      'sid': sid,
-      'Content-Type': 'application/json'
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch resources: ${response.statusText}`);
-  }
-
-  return await response.json();
+  return null;
 }
 ```
 
-## Resource Change Notifications
+### 5. MCP Server Configuration
+**File**: [`src/index.ts`](../src/index.ts)
 
-### Subscription Support
+Key changes:
+- Register ResourceTemplate to declare resources capability
+- Override request handlers for custom authentication logic
+- Pass sessionManager to Express app setup
+- POST-only endpoint (no SSE support needed)
 
 ```typescript
-// src/resources/resource-subscriptions.ts
-const subscriptions = new Map<string, Set<string>>(); // uri -> Set<sessionId>
+// Register ResourceTemplate to declare capability
+server.registerResource(
+  'ib-folders',
+  new ResourceTemplate('ib://{clientId}/folder/{folderId}', { list: undefined }),
+  { title: 'IntelligenceBank Folders', description: '...' },
+  async (uri, params) => { /* handler */ }
+);
 
-server.setRequestHandler(SubscribeRequestSchema, async (request, extra) => {
-  const { uri } = request.params;
-  const sessionId = extra.sessionId;
-
-  if (!subscriptions.has(uri)) {
-    subscriptions.set(uri, new Set());
-  }
-  subscriptions.get(uri)!.add(sessionId);
-
-  return {};
+// Override handlers for custom authentication
+const underlyingServer = server.server;
+underlyingServer.setRequestHandler(ListResourcesRequestSchema, async (request, extra) => {
+  const authHeader = (extra as any)?.headers?.authorization;
+  return await handleResourceList(sessionManager, sessionId, cursor, authHeader);
 });
 
-server.setRequestHandler(UnsubscribeRequestSchema, async (request, extra) => {
-  const { uri } = request.params;
-  const sessionId = extra.sessionId;
-
-  const subs = subscriptions.get(uri);
-  if (subs) {
-    subs.delete(sessionId);
-    if (subs.size === 0) {
-      subscriptions.delete(uri);
-    }
-  }
-
-  return {};
-});
-
-// Notify subscribers when resources change
-export async function notifyResourceChanged(uri: string) {
-  const subs = subscriptions.get(uri);
-  if (subs && subs.size > 0) {
-    await server.notification({
-      method: 'notifications/resources/updated',
-      params: { uri }
-    });
-  }
-}
-```
-
-## Resource Templates
-
-### Dynamic Resource URIs
-
-```typescript
-server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
-  return {
-    resourceTemplates: [
-      {
-        uriTemplate: 'ib://{clientid}/folders/{folderId}',
-        name: 'IntelligenceBank Folder',
-        description: 'Browse folders in IntelligenceBank',
-        mimeType: 'application/vnd.intelligencebank.folder'
-      },
-      {
-        uriTemplate: 'ib://{clientid}/resources/{resourceId}',
-        name: 'IntelligenceBank Resource',
-        description: 'View file metadata from IntelligenceBank',
-        mimeType: 'application/json'
-      },
-      {
-        uriTemplate: 'ib://{clientid}/search?q={query}',
-        name: 'IntelligenceBank Search',
-        description: 'Search for files across IntelligenceBank',
-        mimeType: 'application/json'
-      }
-    ]
-  };
+// POST-only endpoint (Streamable HTTP without SSE)
+app.post('/mcp', async (req, res) => {
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true
+  });
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
 });
 ```
 
-## User Experience Flow
+### 6. Environment Configuration
+**File**: [`.env.example`](../.env.example)
 
-### In Claude Desktop
-
-1. **User clicks "+ / Add action"**
-2. **Claude shows "Add from IntelligenceBank" option**
-3. **User clicks "Add from IntelligenceBank"**
-4. **Resource list loads**:
-   - Shows root folders
-   - Each folder displays name, description, file count
-5. **User clicks a folder**:
-   - Resource read request sent
-   - Subfolder listing returned
-   - User can navigate deeper or view resources
-6. **User clicks a resource**:
-   - Resource metadata displayed
-   - File info, thumbnail, tags, download link
-   - Can be referenced in conversation
-
-### Example Claude Interaction
-
-```
-User: "Show me the files in the Marketing folder"
-
-Claude: *Uses resource ib://clientid/folders/88d57c098bd010ca0527c4372e56fc9e*
-       
-       I can see the Marketing Projects folder contains:
-       - 4 subfolders
-       - Master templates and project-related assets
-       - Restricted access (list permission required)
-
-User: "What images are in Stock Photography?"
-
-Claude: *Uses resource ib://clientid/folders/071a19a4dc506a513533e26f3632fa4a/resources*
-
-       The Stock Photography folder contains 36 images including:
-       - Multiple tagged images (silhouette, black, etc.)
-       - File sizes ranging from 3.66 KB to 582.29 KB
-       - Mostly PNG and JPG formats
-       - Preview permissions with download approval workflow
+Added:
+```bash
+# MCP Server URL for OAuth discovery endpoints
+MCP_SERVER_URL=http://localhost:3000
 ```
 
-## Implementation Phases
+**Production Configuration**:
+```bash
+MCP_SERVER_URL=https://mcp.connectingib.com
+```
 
-### Phase 1: Core Resource Support (Week 1)
-- [ ] Add resource capability to server initialization
-- [ ] Implement basic resource list handler (root folders only)
-- [ ] Implement basic resource read handler (folder metadata)
-- [ ] Add URI parser utility
-- [ ] Test with Claude Desktop
+## Session Management Architecture
 
-### Phase 2: Full Resource Browsing (Week 2)
-- [ ] Implement folder hierarchy navigation
-- [ ] Add resource listing within folders
-- [ ] Implement search functionality
-- [ ] Add pagination support
-- [ ] Test complete browsing experience
+### Dual Session System
 
-### Phase 3: Advanced Features (Week 3)
-- [ ] Add resource subscriptions
-- [ ] Implement resource templates
-- [ ] Add thumbnail previews
-- [ ] Optimize performance with caching
-- [ ] Add comprehensive error handling
+The implementation handles two types of session IDs:
 
-### Phase 4: Polish & Documentation (Week 4)
-- [ ] Add user documentation
-- [ ] Create demo videos
-- [ ] Performance testing and optimization
-- [ ] Security audit
-- [ ] Release to production
+1. **MCP Transport Session ID**: Generated by `StreamableHTTPServerTransport`, used for MCP protocol session management
+2. **OAuth Auth Session ID**: Generated by our `SessionManager`, used for OAuth flow tracking
 
-## Security Considerations
+### Token-Based Session Lookup
 
-### 1. Authentication Validation
-- **Always** validate session credentials before resource access
-- Reject requests without valid `sid`
-- Implement token refresh mechanism
-
-### 2. Permission Enforcement
-- Respect `allowedActions` from IB API responses
-- Filter resources based on user permissions
-- Never expose resources user doesn't have access to
-
-### 3. URI Validation
-- Validate all URI components
-- Prevent path traversal attacks
-- Sanitize client input
-
-### 4. Rate Limiting
-- Implement request throttling
-- Cache frequently accessed resources
-- Respect IB API rate limits
-
-### 5. Session Isolation
-- Each MCP session is isolated
-- No cross-session resource access
-- Clear session data on disconnect
-
-## Performance Optimization
-
-### Caching Strategy
+For resource requests, we use **Bearer token-based lookup** as the primary method:
 
 ```typescript
-// src/cache/resource-cache.ts
-interface CacheEntry<T> {
-  data: T;
-  timestamp: number;
-  ttl: number;
-}
+// Resource request comes in with Authorization header
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
-class ResourceCache {
-  private cache = new Map<string, CacheEntry<any>>();
-
-  set<T>(key: string, data: T, ttl: number = 300000) { // 5 min default
-    this.cache.set(key, {
-      data,
-      timestamp: Date.now(),
-      ttl
-    });
-  }
-
-  get<T>(key: string): T | null {
-    const entry = this.cache.get(key);
-    if (!entry) return null;
-
-    if (Date.now() - entry.timestamp > entry.ttl) {
-      this.cache.delete(key);
-      return null;
-    }
-
-    return entry.data as T;
-  }
-
-  invalidate(key: string) {
-    this.cache.delete(key);
-  }
-
-  invalidatePattern(pattern: RegExp) {
-    for (const key of this.cache.keys()) {
-      if (pattern.test(key)) {
-        this.cache.delete(key);
-      }
-    }
-  }
-}
-
-export const resourceCache = new ResourceCache();
+// We find the session by matching the access token
+session.tokens.accessToken === extractedBearerToken
 ```
 
-### Batch Operations
+This is the correct approach per MCP Authorization specification and OAuth 2.0 Bearer Token Usage (RFC6750).
 
-```typescript
-// Fetch multiple resources in a single API call
-async function fetchMultipleResources(resourceIds: string[], session: Session) {
-  const resources = await fetchResources({
-    sid: session.credentials.sid,
-    clientId: session.credentials.clientId,
-    resourceIds: resourceIds.join(','),
-    limit: 100
-  });
+## Testing
 
-  return resources.rows;
-}
+### Local Testing
+
+```bash
+# Build the project
+npm run build
+
+# Start server
+PORT=3001 MCP_SERVER_URL=http://localhost:3001 node dist/index.js
+
+# Test sub-path discovery endpoint (tried first)
+curl http://localhost:3001/.well-known/oauth-protected-resource/mcp | jq .
+
+# Test root discovery endpoint (fallback)
+curl http://localhost:3001/.well-known/oauth-protected-resource | jq .
+
+# Test authorization server metadata
+curl http://localhost:3001/.well-known/oauth-authorization-server | jq .
+
+# Test 401 response
+curl -i -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"resources/list"}'
+
+# Expected: HTTP/1.1 401 Unauthorized
+# Expected: WWW-Authenticate: Bearer realm="...", scope="read write", ...
+
+# Test with MCP Inspector
+npx @modelcontextprotocol/inspector http://localhost:3001/mcp
 ```
 
-## Testing Strategy
+### Production Testing
 
-### Unit Tests
-- URI parsing
-- Authentication validation
-- Cache operations
-- Error handling
+```bash
+# Test sub-path discovery endpoint
+curl https://mcp.connectingib.com/.well-known/oauth-protected-resource/mcp | jq .
 
-### Integration Tests
-- Full resource browsing flow
-- Authentication flow
-- API client functions
-- Session management
+# Test 401 response
+curl -i -X POST https://mcp.connectingib.com/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"resources/list"}'
 
-### End-to-End Tests
-- Complete user journey in Claude
-- Multi-session scenarios
-- Error recovery
-- Performance under load
-
-## Monitoring & Logging
-
-### Key Metrics
-- Resource access frequency
-- API response times
-- Cache hit rates
-- Authentication failures
-- Error rates by type
-
-### Logging Strategy
-```typescript
-logger.info('Resource accessed', {
-  uri,
-  sessionId,
-  duration: Date.now() - startTime,
-  cacheHit: false
-});
-
-logger.error('Resource access failed', {
-  uri,
-  sessionId,
-  error: error.message,
-  stack: error.stack
-});
+# Test with MCP Inspector
+npx @modelcontextprotocol/inspector https://mcp.connectingib.com/mcp
 ```
+
+### End-to-End Testing with Claude Desktop
+
+1. Remove existing IntelligenceBank connector (if any)
+2. Add new connector: `https://mcp.connectingib.com/mcp`
+3. Verify tools and prompts appear in configuration
+4. Click "Add from IntelligenceBank" in resources menu
+5. **Verify browser opens automatically for OAuth authentication**
+6. Complete authentication on IntelligenceBank platform
+7. Verify resources appear in Claude Desktop
+
+## Deployment
+
+### Environment Variables Required
+
+```bash
+# OAuth Bridge Configuration
+OAUTH_BRIDGE_URL=https://66qz7xd2w8.execute-api.us-west-1.amazonaws.com/dev
+OAUTH_CLIENT_ID=ib-api-tools-mcp-server-prod
+OAUTH_REDIRECT_URI=https://mcp.connectingib.com/callback
+
+# MCP Server Configuration
+PORT=3000
+MCP_SERVER_URL=https://mcp.connectingib.com
+NODE_ENV=production
+
+# CORS Configuration
+ALLOWED_ORIGINS=*
+```
+
+### Deployment Steps
+
+```bash
+# Use the deployment script
+./scripts/deploy.sh
+
+# Or manually:
+npm run build
+tar -czf dist-deploy.tar.gz dist/
+scp -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem \
+  dist-deploy.tar.gz ubuntu@52.9.99.47:/tmp/
+ssh -i ~/Workspace/Keys/ib-mcp-api-tools-keypair-2025.pem ubuntu@52.9.99.47 \
+  "sudo tar -xzf /tmp/dist-deploy.tar.gz -C /opt/ib-api-tools-mcp-server/ && \
+   sudo chown -R ubuntu:ubuntu /opt/ib-api-tools-mcp-server/dist && \
+   pm2 restart ib-mcp-server"
+```
+
+## Troubleshooting
+
+### "Failed to discover OAuth metadata"
+
+**Symptoms**: MCP Inspector or Claude Desktop shows this error when trying to initiate OAuth flow.
+
+**Causes**:
+1. Sub-path discovery endpoint not accessible
+2. Trailing slash in authorization server URL
+3. CORS headers not allowing discovery endpoint access
+
+**Verification**:
+```bash
+# Test sub-path endpoint (tried first)
+curl https://mcp.connectingib.com/.well-known/oauth-protected-resource/mcp
+
+# Should return 200 OK with metadata
+# authorization_servers should NOT have trailing slash
+```
+
+### Resources Don't Appear in Claude Desktop
+
+**Check**:
+1. Discovery endpoints are accessible
+2. Server returns HTTP 401 for unauthenticated requests
+3. WWW-Authenticate header is present in 401 response
+4. CORS headers allow Authorization header
+5. Tools and prompts are visible (indicates server is connecting)
+
+### OAuth Flow Doesn't Start
+
+**Check**:
+1. `MCP_SERVER_URL` environment variable uses HTTPS in production
+2. Discovery endpoints return correct OAuth bridge URLs without trailing slashes
+3. OAuth bridge is accessible from user's browser
+4. Redirect URI matches OAuth bridge configuration
+
+### Authentication Fails After OAuth
+
+**Check**:
+1. OAuth callback endpoint (`/callback`) is accessible
+2. Access token is being stored in session
+3. Bearer token is being sent in Authorization header
+4. Session lookup by token is working correctly
+
+## Implementation Files
+
+### Core Implementation
+- [`src/auth/mcp-authorization.ts`](../src/auth/mcp-authorization.ts) - OAuth discovery endpoints (172 lines)
+- [`src/auth/mcp-auth-middleware.ts`](../src/auth/mcp-auth-middleware.ts) - HTTP 401 middleware (87 lines)
+- [`src/server/express-setup.ts`](../src/server/express-setup.ts) - Express configuration (37 lines)
+- [`src/resources/resource-handlers.ts`](../src/resources/resource-handlers.ts) - Resource handlers with auth (346 lines)
+- [`src/index.ts`](../src/index.ts) - MCP server setup (251 lines)
+
+### Configuration
+- [`.env.example`](../.env.example) - Environment template with MCP_SERVER_URL
+
+### Documentation
+- [`docs/mcp-resources-implementation-plan.md`](mcp-resources-implementation-plan.md) - This document
+- [`docs/currentTask.md`](currentTask.md) - Current development tasks
+- [`docs/codebaseSummary.md`](codebaseSummary.md) - Overall codebase structure
+- [`docs/techStack.md`](techStack.md) - Technology stack details
+
+## Verification Checklist
+
+- [x] Sub-path discovery endpoint accessible
+- [x] Root discovery endpoint accessible (fallback)
+- [x] Authorization server URLs without trailing slashes
+- [x] HTTPS URLs in production
+- [x] HTTP 401 with WWW-Authenticate header
+- [x] Bearer token authentication working
+- [x] Tools registered and visible
+- [x] Prompts registered and visible
+- [x] Resources capability declared
+- [ ] OAuth flow tested in MCP Inspector
+- [ ] OAuth flow tested in Claude Desktop
+- [ ] Resources browsing tested end-to-end
+
+## Known Limitations
+
+1. **Single User Sessions**: Current implementation assumes one user per session
+2. **No Token Revocation**: Tokens are not actively revoked on logout
+3. **Memory-Based Sessions**: Sessions are stored in memory, lost on server restart
+4. **No Rate Limiting**: No built-in rate limiting for API calls
+5. **No SSE Support**: Server uses POST-only Streamable HTTP (SSE streams not implemented)
+
+## Future Enhancements
+
+1. **Token Refresh**: Implement automatic access token refresh using refresh tokens
+2. **Session Persistence**: Store sessions in Redis for multi-instance deployments
+3. **Resource Caching**: Cache folder/file listings to reduce API calls
+4. **Webhook Support**: Subscribe to IntelligenceBank webhooks for real-time updates
+5. **Advanced Filtering**: Add search and filter capabilities to resource listings
 
 ## Conclusion
 
-Implementing MCP Resources for IntelligenceBank will provide users with a seamless browsing experience directly within Claude, making it easy to discover and reference files without leaving the conversation. The architecture respects existing authentication patterns, enforces security boundaries, and provides an intuitive interface for navigating the IntelligenceBank file structure.
+The implementation successfully provides automatic OAuth authentication for MCP Resources, following the MCP Authorization specification (RFC9728, RFC8414, RFC6750). All discovery endpoints are properly configured with both sub-path and root support, HTTPS URLs, and no trailing slashes.
 
-The phased implementation approach allows for iterative development and testing, ensuring each component works correctly before moving to the next phase. With proper caching and optimization, the system will provide fast, responsive access to IntelligenceBank resources while maintaining security and session isolation.
+The server is ready for end-to-end testing with Claude Desktop and MCP Inspector.
+
+## Related Documentation
+
+- [`docs/currentTask.md`](currentTask.md) - Current development tasks
+- [`docs/codebaseSummary.md`](codebaseSummary.md) - Overall codebase structure
+- [`docs/techStack.md`](techStack.md) - Technology stack details
+- [`docs/authentication-architecture.md`](authentication-architecture.md) - Authentication system overview
+- [`docs/development-workflow.md`](development-workflow.md) - Deployment and testing procedures

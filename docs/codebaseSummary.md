@@ -20,6 +20,8 @@
 ├── src/                         # Source code (modular architecture)
 │   ├── index.ts                 # Main server entry point
 │   ├── types.ts                 # Legacy types (to be removed)
+│   ├── api/                     # IntelligenceBank API client
+│   │   └── ib-api-client.ts     # API functions for folders/resources
 │   ├── auth/                    # OAuth protocol implementation
 │   │   ├── oauth-callback.ts    # OAuth callback handler
 │   │   ├── oauth-utils.ts       # PKCE utilities
@@ -27,9 +29,11 @@
 │   │   └── html-pages.ts        # Success/error HTML pages
 │   ├── core/                    # Core infrastructure
 │   │   └── tool-registry.ts     # Tool registration helper
+│   ├── resources/               # MCP Resources implementation
+│   │   └── resource-handlers.ts # Resource list/read handlers
 │   ├── server/                  # HTTP server setup
 │   │   ├── express-setup.ts     # Express app configuration
-│   │   └── upload-handler.ts    # File upload endpoint (NEW)
+│   │   └── upload-handler.ts    # File upload endpoint
 │   ├── session/                 # Session management
 │   │   └── SessionManager.ts    # Auth session lifecycle
 │   ├── tools/                   # MCP tool implementations
@@ -39,9 +43,12 @@
 │   │   ├── get-compliance-filters.tool.ts  # Fetch category filters
 │   │   ├── run-file-compliance-review.tool.ts  # Complete compliance review workflow
 │   │   └── status.ts            # Legacy status tool
-│   └── types/                   # Type definitions
-│       ├── session.types.ts     # AuthSession interface
-│       └── compliance-review.types.ts  # Compliance review types
+│   ├── types/                   # Type definitions
+│   │   ├── session.types.ts     # AuthSession interface
+│   │   ├── compliance-review.types.ts  # Compliance review types
+│   │   └── resource.types.ts    # MCP Resources types
+│   └── utils/                   # Utility functions
+│       └── uri-parser.ts        # ib:// URI parser
 ├── .env.example                 # Environment variable template
 ├── biome.json                   # Code formatting/linting config
 ├── package.json                 # Dependencies and scripts
@@ -81,6 +88,10 @@
 Application entry point that orchestrates all components:
 - Initializes SessionManager for auth session tracking
 - Creates OAuthCallbackHandler for token exchange
+- Registers MCP resources:
+  - Resource template: `ib://{clientid}/{type}/{id}`
+  - List handler: Returns root folders for client
+  - Read handler: Routes to folder/resource/search handlers
 - Registers MCP tools:
   - Authentication: auth_login, auth_status, api_call
   - Compliance: get_compliance_filters, run_file_compliance_review
@@ -263,6 +274,24 @@ Defines `AuthSession` interface with dual authentication:
     sidExpiry: number;         // Unix timestamp when sid expires
   };
 }
+
+interface IBFolder {
+  _id: string;                  // Folder ID
+  name: string;                 // Folder name
+  parent?: string;              // Parent folder ID
+  // Additional folder properties
+}
+
+interface IBResource {
+  _id: string;                  // Resource ID
+  name: string;                 // File name
+  type: string;                 // File type (pdf, image, etc.)
+  size: number;                 // File size in bytes
+  folder: string;               // Parent folder ID
+  created: string;              // Creation date
+  modified: string;             // Last modified date
+  // Additional resource properties
+}
 ```
 
 ## Data Flow
@@ -389,6 +418,18 @@ For local deployments or when file path is accessible:
 - **Linter**: Enabled with recommended rules
 
 ## Recent Changes
+
+### January 2025 - MCP Resources Implementation
+- **New Protocol**: Full MCP Resources support for browsing IntelligenceBank
+- **New Modules**:
+  - `src/resources/resource-handlers.ts` - Resource list/read handlers
+  - `src/api/ib-api-client.ts` - IntelligenceBank API client
+  - `src/utils/uri-parser.ts` - ib:// URI parser
+  - `src/types/resource.types.ts` - Resource type definitions
+- **URI Scheme**: Custom `ib://{clientid}/{type}/{id}` for resources
+- **Resource Types**: folder, resource, folder-resources, search
+- **Integration**: Registered in server initialization with ResourceTemplate
+- **Status**: Implemented, built, deployed to production ✓
 
 ### January 2025 - File Upload Architecture
 - **New Endpoint**: POST /upload for multipart file uploads

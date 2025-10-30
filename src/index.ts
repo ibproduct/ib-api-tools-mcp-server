@@ -6,7 +6,7 @@
  */
 
 import 'dotenv/config';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 // Import our modularized components
@@ -15,6 +15,8 @@ import { OAuthCallbackHandler } from './auth/oauth-callback.js';
 import { createExpressApp } from './server/express-setup.js';
 import { ToolRegistry } from './core/tool-registry.js';
 import { setupUploadEndpoint, cleanupAllFiles } from './server/upload-handler.js';
+import { extractBearerToken, buildWWWAuthenticateHeader } from './auth/mcp-authorization.js';
+import { findOrCreateSessionFromToken } from './auth/mcp-auth-middleware.js';
 
 // Import tools
 import { AuthLoginTool } from './tools/auth-login.tool.js';
@@ -24,6 +26,12 @@ import { BrowserLoginStartTool, BrowserLoginCompleteTool } from './tools/browser
 import { UploadFileTool } from './tools/upload-file.tool.js';
 import { GetComplianceFiltersTool } from './tools/get-compliance-filters.tool.js';
 import { RunFileComplianceReviewTool } from './tools/run-file-compliance-review.tool.js';
+
+// Import resource handlers
+import {
+    handleResourceList,
+    handleResourceRead
+} from './resources/resource-handlers.js';
 
 // ============================================================================
 // Initialize Components
@@ -70,6 +78,61 @@ const server = new McpServer({
 // Register all tools with the MCP server
 toolRegistry.registerWithMcpServer(server);
 
+// ============================================================================
+// MCP Resources Support
+// ============================================================================
+
+// Register a ResourceTemplate to declare the resources capability
+// Simplified to only handle IntelligenceBank resources (not folders)
+server.registerResource(
+    'ib-resources',
+    new ResourceTemplate('ib://{clientId}/resource/{resourceId}', { list: undefined }),
+    {
+        title: 'IntelligenceBank Resources',
+        description: 'Browse IntelligenceBank resources with optional keyword search'
+    },
+    async (uri, params) => {
+        // This handler won't be called because we override the list/read handlers below
+        // But we need to register at least one resource to declare the capability
+        return {
+            contents: [{
+                uri: uri.href,
+                text: 'Use resources/list to browse resources'
+            }]
+        };
+    }
+);
+
+// Now override the handlers with our custom authentication-aware implementations
+import {
+    ListResourcesRequestSchema,
+    ReadResourceRequestSchema
+} from '@modelcontextprotocol/sdk/types.js';
+
+const underlyingServer = server.server;
+
+// Override resource list handler with Authorization header support
+underlyingServer.setRequestHandler(ListResourcesRequestSchema, async (request, extra) => {
+    const sessionId = (extra as any)?.sessionId || '';
+    // Use global currentAuthHeader set by handleMcpEndpoint
+    const authHeader = currentAuthHeader;
+    const cursor = request.params?.cursor;
+    return await handleResourceList(sessionManager, sessionId, cursor, authHeader);
+});
+
+// Override resource read handler with Authorization header support
+underlyingServer.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+    const sessionId = (extra as any)?.sessionId || '';
+    // Use global currentAuthHeader set by handleMcpEndpoint
+    const authHeader = currentAuthHeader;
+    const uri = request.params.uri;
+    return await handleResourceRead(sessionManager, sessionId, uri, authHeader);
+});
+
+// ============================================================================
+// MCP Prompts
+// ============================================================================
+
 // Register MCP Prompt for compliance review guidance
 server.registerPrompt('compliance_review_help', {
     title: 'Run File Compliance Review',
@@ -108,7 +171,7 @@ Please guide me through this process step by step.`
 // Express App Setup
 // ============================================================================
 
-const app = createExpressApp();
+const app = createExpressApp(sessionManager);
 
 // Setup file upload endpoint
 setupUploadEndpoint(app);
@@ -118,9 +181,98 @@ app.get('/callback', async (req, res) => {
     await oauthCallbackHandler.handleCallback(req, res);
 });
 
-// MCP endpoint
-app.post('/mcp', async (req, res) => {
+// Store current request in a global for access by handlers
+let currentAuthHeader: string | undefined;
+
+/**
+ * Determine if a request requires authentication
+ * Initialize and notifications are allowed without auth per MCP specification
+ */
+function shouldRequireAuth(body: any): boolean {
+    if (!body || !body.method) {
+        return false;
+    }
+    
+    const method = body.method;
+    
+    // Allow MCP handshake and notification methods without auth
+    // These are required for proper MCP client connection establishment
+    if (method === 'initialize' ||
+        method === 'initialized' ||
+        method === 'notifications/initialized' ||
+        method.startsWith('notifications/')) {
+        return false;
+    }
+    
+    // All other methods require authentication
+    return true;
+}
+
+// MCP endpoint handler - supports both POST and GET for streamable-http transport
+const handleMcpEndpoint = async (req: any, res: any) => {
     try {
+        const authHeader = req.headers.authorization;
+        const token = extractBearerToken(authHeader);
+        const serverUrl = process.env.MCP_SERVER_URL || `${req.protocol}://${req.get('host')}`;
+        
+        console.log('[handleMcpEndpoint] Request received:', {
+            method: req.body?.method,
+            id: req.body?.id,
+            hasAuthHeader: !!authHeader,
+            hasToken: !!token
+        });
+        
+        // Check if this request requires authentication
+        const requiresAuth = shouldRequireAuth(req.body);
+        
+        // If authentication is required but no token provided, return 401
+        if (requiresAuth && !token) {
+            console.log('Authentication required but no token provided for method:', req.body?.method);
+            res.status(401)
+               .set('WWW-Authenticate', buildWWWAuthenticateHeader({
+                   realm: serverUrl,
+                   scope: 'profile',
+                   resource_metadata: `${serverUrl}/.well-known/oauth-protected-resource`
+               }))
+               .json({
+                   jsonrpc: '2.0',
+                   error: {
+                       code: -32001,
+                       message: 'Authentication required. Please authenticate to access this resource.'
+                   },
+                   id: req.body?.id || null
+               });
+            return;
+        }
+        
+        // If token is provided, validate it and ensure session exists
+        if (token) {
+            const session = await findOrCreateSessionFromToken(sessionManager, authHeader);
+            if (!session) {
+                console.log('Invalid or expired token provided');
+                res.status(401)
+                   .set('WWW-Authenticate', buildWWWAuthenticateHeader({
+                       realm: serverUrl,
+                       error: 'invalid_token',
+                       errorDescription: 'The access token is invalid or expired',
+                       resource_metadata: `${serverUrl}/.well-known/oauth-protected-resource`
+                   }))
+                   .json({
+                       jsonrpc: '2.0',
+                       error: {
+                           code: -32001,
+                           message: 'Invalid or expired access token'
+                       },
+                       id: req.body?.id || null
+                   });
+                return;
+            }
+            console.log('Valid token provided, session:', session.sessionId);
+        }
+        
+        // Store Authorization header globally for access by resource handlers
+        currentAuthHeader = authHeader;
+        
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: undefined,
             enableJsonResponse: true,
@@ -130,12 +282,14 @@ app.post('/mcp', async (req, res) => {
 
         res.on('close', () => {
             transport.close();
+            currentAuthHeader = undefined;
         });
 
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
     } catch (error) {
         console.error('Error handling MCP request:', error);
+        currentAuthHeader = undefined;
         if (!res.headersSent) {
             res.status(500).json({
                 jsonrpc: '2.0',
@@ -147,7 +301,11 @@ app.post('/mcp', async (req, res) => {
             });
         }
     }
-});
+};
+
+// Register both POST and GET - StreamableHTTPServerTransport handles both
+app.post('/mcp', handleMcpEndpoint);
+app.get('/mcp', handleMcpEndpoint);
 
 // ============================================================================
 // Server Startup
@@ -170,6 +328,13 @@ app.listen(port, () => {
     console.log('');
     console.log('Available prompts:');
     console.log('  - compliance_review_help: Guided workflow for running file compliance reviews');
+    console.log('');
+    console.log('MCP Resources:');
+    console.log('  - Browse IntelligenceBank resources directly');
+    console.log('  - URI scheme: ib://{clientid}/resource/{resourceId}');
+    console.log('  - Supports keyword search via cursor parameter');
+    console.log('  - Sorted by last update time (most recent first)');
+    console.log('  - Returns up to 100 resources per page');
 }).on('error', (error) => {
     console.error('Server error:', error);
     process.exit(1);
